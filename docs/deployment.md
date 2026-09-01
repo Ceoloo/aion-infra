@@ -5,26 +5,48 @@ declarative; releases are controlled; production is deliberate.
 
 ## Pipelines
 
+The runtime **image** is built and published by the
+[aion-runtime](https://github.com/Ceoloo/aion-runtime) repo (ADR-002).
+aion-infra **consumes** it and builds nothing.
+
 | Workflow | Trigger | Does |
 |---|---|---|
-| `validate.yml` | every PR + push to `main` | fmt, validate, tfsec (advisory), runtime typecheck/build, gitleaks, staging plan (if cloud auth configured) |
-| `deploy-gcp.yml` (staging) | push to `main` | build image → apply infra → migrate job → roll service → smoke |
-| `deploy-gcp.yml` (production) | manual dispatch, `main` only | **required-reviewer approval** → same steps with prod identity |
+| `validate.yml` | every PR + push to `main` | fmt, validate, tfsec (advisory), infra portability + verify, gitleaks, staging plan (if cloud auth configured) — **always runs, provider-independent** |
+| `deploy-gcp.yml` (staging) | push to `main` **and GCP configured** | resolve immutable image → apply infra → migrate job → roll service → smoke |
+| `deploy-gcp.yml` (production) | manual dispatch, `main` only **and GCP configured** | **required-reviewer approval** → same steps with prod identity |
+| `deploy-vps.yml` | manual dispatch | resolve immutable image → SSH → pull → migrate → roll → readiness → smoke |
 
-Both environments deploy through the same `gcp-deploy` composite action, so they
-behave identically (aion-infra §44).
+Both GCP environments deploy through the same `gcp-deploy` composite action, so
+they behave identically (aion-infra §44).
+
+### Readiness gate (provider dormant until configured)
+
+The GCP deploy jobs carry an `if` guard requiring
+`vars.GCP_WORKLOAD_IDENTITY_PROVIDER` **and** the per-environment CI
+service-account var to be set. Until GCP is configured the jobs are **skipped**
+(not failed), so an unprovisioned provider produces no noisy red runs and a
+genuine failure is unambiguous. Setting the vars reactivates GCP with no code
+change. `validate.yml` is **never** gated — credential-free checks run regardless.
+
+### Immutable release (no bare `:latest`)
+
+Deployments resolve and persist an **immutable** runtime reference
+`ghcr.io/ceoloo/aion-runtime:<runtime-commit-sha>` (the `resolve` job/step reads
+aion-runtime's `main` HEAD SHA, or you pin one via the `runtime_image` dispatch
+input). `:latest` remains as convenience metadata but is never the deployed
+reference — so rollback is deterministic and `/health`'s `git_sha` answers
+"exactly which runtime is this?".
 
 ## Release steps (per environment)
 
-1. **Build immutable artifact** — `docker build` the reference runtime, tag with
-   the commit SHA, push to Artifact Registry. The running commit is always
-   identifiable (§21–22).
-2. **Apply infrastructure** — `terraform apply` (idempotent; image changes are
-   ignored by Terraform so this never fights the rollout).
-3. **Migrate (before deploy)** — update the migration job to the new image and
+1. **Resolve immutable image** — `ghcr.io/ceoloo/aion-runtime:<sha>` (from the
+   aion-runtime main HEAD, or an explicit pin). aion-infra builds no image.
+2. **Apply infrastructure** — `terraform apply` (idempotent; the image is ignored
+   by Terraform so this never fights the rollout).
+3. **Migrate (before deploy)** — point the migration job at that image and
    `execute --wait`. A failed migration returns non-zero and **stops the deploy**
    (§18, §46, §63); the currently-serving revision stays up.
-4. **Roll the service** — `gcloud run services update --image <sha>`; Cloud Run
+4. **Roll the service** — `gcloud run services update --image <…:sha>`; Cloud Run
    shifts traffic only after the startup probe (`/health/ready`) passes.
 5. **Smoke test** — `scripts/smoke-test.sh` verifies reachability, health, and
    that the deployed SHA matches (§45).

@@ -2,9 +2,9 @@ name: deploy-vps
 
 # VPS deployment path (aion-infra amendment §13). The runtime IMAGE is built and
 # published by the aion-runtime repo (ADR-002); aion-infra CONSUMES it — it does
-# not build it. This workflow deploys a given aion-runtime image over SSH.
-# Production preserves the human gate via a GitHub Environment required-reviewers
-# rule. No private SSH key is exposed beyond the Environment secret it lives in.
+# not build it. Deployments resolve and persist an IMMUTABLE runtime commit SHA
+# (never a bare :latest). Production preserves the human gate via a GitHub
+# Environment required-reviewers rule. Dispatch-only, so no auto-noise to gate.
 on:
   workflow_dispatch:
     inputs:
@@ -14,8 +14,8 @@ on:
         options: [staging, production]
         default: staging
       runtime_image:
-        description: aion-runtime image to deploy (default = latest published)
-        default: ghcr.io/ceoloo/aion-runtime:latest
+        description: Pin a specific aion-runtime image (blank = resolve latest main SHA)
+        default: ''
 
 permissions:
   contents: read
@@ -37,6 +37,19 @@ jobs:
           if [ "${{ github.event.inputs.environment }}" = "production" ] && [ "${GITHUB_REF}" != "refs/heads/main" ]; then
             echo "production VPS deploy only from main" >&2; exit 1
           fi
+      - name: resolve immutable runtime image
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PINNED: ${{ github.event.inputs.runtime_image }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PINNED}" ]; then
+            echo "image=${PINNED}" >> "$GITHUB_OUTPUT"
+          else
+            SHA="$(gh api repos/ceoloo/aion-runtime/commits/main --jq .sha)"
+            echo "image=ghcr.io/ceoloo/aion-runtime:${SHA}" >> "$GITHUB_OUTPUT"
+          fi
       - name: deploy
         uses: appleboy/ssh-action@v1
         with:
@@ -47,9 +60,9 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/aion
-            # Point .env at the chosen aion-runtime image + record its tag as GIT_SHA.
+            # Point .env at the immutable aion-runtime image + record its tag as GIT_SHA.
             sudo sed -i "s#^AION_IMAGE=.*#AION_IMAGE=${DEPLOY_IMAGE}#" .env
             sudo sed -i "s#^GIT_SHA=.*#GIT_SHA=${DEPLOY_IMAGE##*:}#" .env
             ./scripts/deploy.sh
         env:
-          DEPLOY_IMAGE: ${{ github.event.inputs.runtime_image }}
+          DEPLOY_IMAGE: ${{ steps.pick.outputs.image }}

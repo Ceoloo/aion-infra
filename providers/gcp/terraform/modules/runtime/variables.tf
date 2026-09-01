@@ -25,7 +25,7 @@ variable "subnet_id" {
 
 variable "image" {
   type        = string
-  description = "Immutable container image (…/aion-runtime:<git-sha>). Placeholder is replaced by the deploy pipeline."
+  description = "aion-runtime image to run. The :latest default is a PLAN-ONLY placeholder; deploys inject an immutable ghcr.io/ceoloo/aion-runtime:<sha> (ADR-002)."
   default     = "ghcr.io/ceoloo/aion-runtime:latest"
 }
 

@@ -6,10 +6,13 @@ name: deploy
 # runs from main. No AI worker can independently release to production.
 #
 # The runtime IMAGE is built and published by the aion-runtime repo (ADR-002);
-# aion-infra CONSUMES it — it does not build it. Order is migration-BEFORE-deploy
-# (§18): apply infra → run the migration JOB on the aion-runtime image (halts on
-# failure) → roll the service → smoke test. A failed migration stops the job
-# before the runtime is updated, leaving the existing revision serving (§46, §63).
+# aion-infra CONSUMES it — it does not build it. Deployments resolve and persist
+# an IMMUTABLE runtime commit SHA (never a bare :latest), so rollback is
+# deterministic and "which runtime is this?" has one answer.
+#
+# READINESS GATE: the GCP jobs only run once the WIF + CI service-account vars
+# exist. Until GCP is configured they stay dormant (no noisy Google-auth
+# failures); setting the vars reactivates them with no further change.
 on:
   push:
     branches: [main]
@@ -21,8 +24,8 @@ on:
         options: [staging, production]
         default: staging
       runtime_image:
-        description: aion-runtime image to deploy (default = latest published)
-        default: ghcr.io/ceoloo/aion-runtime:latest
+        description: Pin a specific aion-runtime image (blank = resolve latest main SHA)
+        default: ''
 
 permissions:
   contents: read
@@ -35,13 +38,38 @@ concurrency:
 env:
   REGION: us-central1
   TF_VERSION: 1.9.8
-  RUNTIME_IMAGE: ${{ github.event.inputs.runtime_image || 'ghcr.io/ceoloo/aion-runtime:latest' }}
 
 jobs:
-  # ── Staging: automatic after merge to main ────────────────────────────────
+  # Resolve the immutable image to deploy. An explicit input wins; otherwise the
+  # default is the aion-runtime main HEAD commit SHA (its CI publishes
+  # ghcr.io/ceoloo/aion-runtime:<sha> for every main push). Never :latest.
+  resolve:
+    name: resolve immutable runtime image
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.pick.outputs.image }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PINNED: ${{ github.event.inputs.runtime_image }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PINNED}" ]; then
+            echo "image=${PINNED}" >> "$GITHUB_OUTPUT"
+          else
+            SHA="$(gh api repos/ceoloo/aion-runtime/commits/main --jq .sha)"
+            echo "image=ghcr.io/ceoloo/aion-runtime:${SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── Staging: automatic after merge to main — ONLY when GCP is configured ──
   staging:
     name: deploy staging
-    if: github.event_name == 'push' || github.event.inputs.target == 'staging'
+    needs: resolve
+    if: >
+      (github.event_name == 'push' || github.event.inputs.target == 'staging') &&
+      vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
+      vars.GCP_CI_SERVICE_ACCOUNT_STAGING != ''
     runs-on: ubuntu-latest
     environment: staging
     steps:
@@ -64,12 +92,17 @@ jobs:
           state_bucket: ${{ vars.GCP_TFSTATE_BUCKET_STAGING }}
           app_password: ${{ secrets.STAGING_APP_DB_PASSWORD }}
           migrator_password: ${{ secrets.STAGING_MIGRATOR_DB_PASSWORD }}
-          image: ${{ env.RUNTIME_IMAGE }}
+          image: ${{ needs.resolve.outputs.image }}
 
-  # ── Production: manual, human-gated, main only ─────────────────────────────
+  # ── Production: manual, human-gated, main only — ONLY when GCP is configured ─
   production:
     name: deploy production
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'production'
+    needs: resolve
+    if: >
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.target == 'production' &&
+      vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
+      vars.GCP_CI_SERVICE_ACCOUNT_PRODUCTION != ''
     runs-on: ubuntu-latest
     # This Environment MUST have a required-reviewers protection rule configured
     # in GitHub → the human gate. The job pauses here until a human approves.
@@ -100,4 +133,4 @@ jobs:
           state_bucket: ${{ vars.GCP_TFSTATE_BUCKET_PRODUCTION }}
           app_password: ${{ secrets.PRODUCTION_APP_DB_PASSWORD }}
           migrator_password: ${{ secrets.PRODUCTION_MIGRATOR_DB_PASSWORD }}
-          image: ${{ env.RUNTIME_IMAGE }}
+          image: ${{ needs.resolve.outputs.image }}
