@@ -30,7 +30,7 @@ These are objectives to operate against and improve, not contractual guarantees.
 ## Restore verification (§32, §65)
 
 **The critical question: can AION actually restore its durable state?**
-`scripts/backup-verify.sh` answers it without ever restoring over production:
+`providers/gcp/scripts/backup-verify.sh` answers it without ever restoring over production:
 
 - `MODE=check` (default): lists backups, asserts the latest is recent (< ~26h).
 - `MODE=restore`: clones the latest backup into a **new, isolated** instance,

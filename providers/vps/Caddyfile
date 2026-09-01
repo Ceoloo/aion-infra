@@ -1,0 +1,23 @@
+# AION VPS reverse proxy — HTTPS with automatic certificates (Let's Encrypt).
+#
+# Caddy is chosen for materially lower TLS operational burden: it obtains and
+# renews certificates automatically, so there are no certs to manage by hand
+# (aion-infra amendment §10). Only the runtime's HTTP ingress is exposed; the
+# database is never proxied.
+
+{$AION_DOMAIN} {
+	encode gzip
+
+	# Health endpoints are proxied through unchanged — the provider-neutral
+	# /health/live and /health/ready are the SAME on every target (§24).
+	reverse_proxy aion-runtime:8080 {
+		health_uri /health/ready
+		health_interval 10s
+		health_timeout 3s
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

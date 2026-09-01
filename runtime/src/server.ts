@@ -5,11 +5,11 @@
  *
  *   GET /health/live   — liveness: process is up. Cheap, NO dependency work
  *                        (§29: "Do not make health checks trigger expensive
- *                        business execution"). Used by the Cloud Run liveness
+ *                        business execution"). Called by the platform's liveness
  *                        probe to restart a wedged process.
  *   GET /health/ready  — readiness: can we safely accept work? Checks database
  *                        connectivity. Fails (503) when the DB is unreachable so
- *                        Cloud Run withholds traffic (§29, §62).
+ *                        the platform withholds traffic (§29, §62).
  *   GET /              — release metadata (git_sha / version / environment).
  */
 import http from 'node:http';

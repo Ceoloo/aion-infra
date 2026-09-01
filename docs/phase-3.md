@@ -49,7 +49,7 @@ stays portable in spirit (portable PostgreSQL, containerized runtime).
 - **Controlled migrations**: separate Cloud Run job, aion-data's own runner,
   migration-before-deploy, fail-closed.
 - **CI/CD**: `validate.yml` (fmt/validate/tfsec/typecheck/gitleaks/plan) and
-  `deploy.yml` (auto staging; human-gated production).
+  `deploy-gcp.yml` (auto staging; human-gated production).
 - **Observability**: bounded log retention + basic alerts.
 - **Scripts**: migrate, health-check, smoke-test, backup-verify, verify.
 
@@ -137,6 +137,54 @@ small; production HA is the single largest line and is a deliberate safety
 choice. Figures are estimates and must be confirmed against the live billing
 account before relying on them.
 
+## Portability amendment (provider neutrality)
+
+After the initial GCP-targeted Phase 3, a **portability-hardening pass** ensured
+GCP is a *deployment profile*, not part of the AION runtime contract. AION can
+now move between a generic VPS, AWS, or GCP without changing aion-core,
+aion-data, or product code — see [portability.md](portability.md) and
+[`contracts/deployment-contract.md`](../contracts/deployment-contract.md).
+
+**What changed:**
+
+- **Provider boundary.** The GCP Terraform + gcloud scripts moved intact to
+  `providers/gcp/`; nothing was rewritten. GCP-specific names (Cloud Run, Cloud
+  SQL, Secret Manager, WIF) now appear only inside `providers/gcp/` and its docs.
+- **Deployment contract.** `contracts/deployment-contract.md` defines the stable,
+  provider-neutral workload contract (runtime, database, config surface, secret
+  injection, deployment sequence, recovery).
+- **VPS profile (ACTIVE / low-cost).** `providers/vps/` — Docker Compose + Caddy
+  (auto-TLS) + the same runtime image + optional local Postgres (Mode A) or
+  managed DB (Mode B, config-only); env-file secrets; encrypted off-host
+  backup + isolated-restore scripts; minimal server hardening; SSH deploy CI.
+- **AWS profile (SUPPORTED architecture).** `providers/aws/` — full AION→AWS
+  mapping + minimal, `validate`-passing Terraform (ECS Fargate, RDS 16, Secrets
+  Manager, ECR, CloudWatch, ALB, GitHub OIDC) with the same runtime/migration
+  separation. Not provisioned.
+- **Same artifact / same migrations.** One `runtime/Dockerfile`; every profile
+  consumes an image variable and runs the same aion-data migrate entrypoint.
+  The runtime imports no cloud SDK; provider comments were removed from the app.
+- **Portability tests.** `scripts/portability-check.sh` — **12/12 pass** (no
+  cloud SDK in runtime/core/data, neutral secret injection/logging/health, one
+  Dockerfile, same migrations, no hardcoded DB host, provider tech confined to
+  `providers/`).
+
+**Amendment exit checks (§37):** `PROVIDER_NEUTRAL_RUNTIME_CONTRACT`,
+`SAME_RUNTIME_ARTIFACT`, `SAME_AION_DATA_MIGRATIONS`,
+`GENERIC_POSTGRES_COMPATIBILITY`, `VPS_DEPLOYMENT_PROFILE`,
+`AWS_DEPLOYMENT_MAPPING`, `GCP_PROFILE_ISOLATED`, `PROVIDER_NEUTRAL_LOGGING`,
+`PROVIDER_NEUTRAL_HEALTH`, `PROVIDER_NEUTRAL_SECRET_INJECTION`,
+`PORTABILITY_TESTS_PASS` — **all pass** (`scripts/portability-check.sh`). The
+amendment does not require all three providers to be live.
+
+**VPS acceptance (local):** the same runtime image entrypoints were run against a
+local PostgreSQL 16 (Docker daemon unavailable here): migrations applied,
+runtime booted as the app role, `/health/live` + `/health/ready` returned 200,
+the boot smoke lifecycle completed, the release SHA was reported, and the config
+guard rejected a runtime handed the migration URL. The Docker-Compose-on-a-real-
+VPS and live SSH-deploy steps are documented but not executed (no Docker/VPS
+here).
+
 ## Architecture issues
 
 ### Carried forward from Phase 2 (unchanged — not "fixed" in Infra, §68)
@@ -151,10 +199,14 @@ account before relying on them.
 
 6. **Runtime host ownership is undecided.** The reference host imports
    `@aion/core`/`@aion/data`, which the dependency rules forbid *infra* code from
-   doing. It is scoped as an isolated verification **fixture** (not
-   Terraform-managed platform code), but its production home — aion-core, or a
-   new `aion-runtime` repo — is an open decision. **Recommendation: an ADR in
-   aion-docs before Phase 4 wires a real product runtime.**
+   doing. It stays scoped as an isolated verification **fixture** (not
+   Terraform-managed platform code), and the portability amendment kept it
+   minimal and provider-neutral (no cloud SDK, no expanded responsibilities —
+   amendment §35). Its production home — `aion-core/runtime`, a dedicated
+   `aion-runtime` package/repo, or an `aion-products` composition root — remains
+   an open decision that this repo may not make silently. **Recommendation: a
+   durable ADR in aion-docs (drafted in the completion report) before Phase 4
+   wires a real product runtime.**
 7. **DB privilege bootstrapping on managed Postgres.** `grants.sql`'s
    database/schema-level `GRANT`s require the migrator to own the DB/schema; the
    substantive per-table least-privilege holds regardless, but the ownership
@@ -166,6 +218,20 @@ account before relying on them.
    when convenient.**
 9. **Vendored `@aion/data` pinned to `main`.** No tagged release exists yet
    (mirrors issue 5). **Recommendation: pin to a tag once aion-data cuts one.**
+
+### Added by the portability amendment
+
+10. **Provider portability must stay workload-level, not a cloud-API
+    abstraction.** The invariant is preserved at the deployment-contract boundary
+    only; there is deliberately no `CloudProvider` framework in the application
+    (deployment-contract §7; docs/portability.md). **Recommendation: keep it that
+    way — reject any PR that adds a runtime cloud-abstraction layer.**
+11. **VPS local Postgres has higher operational risk than managed PostgreSQL**
+    (single host, self-managed backups/patching). **Recommendation: use Mode B
+    (managed DB URL) as soon as budget allows — it is a config-only change.**
+12. **VPS env-file secrets are weaker than a managed secret store.** Root-owned
+    `0600` is pragmatic but not a vault. **Recommendation: treat the host as
+    sensitive (hardening), and prefer a managed secret source as AION grows.**
 
 ## Exit criteria (§66–67)
 
@@ -192,9 +258,21 @@ health/readiness exist, and the release SHA is identifiable.
 
 ## Recommendation
 
-**READY WITH CONDITIONS.** The infrastructure is complete, coherent, and proven
-by static validation plus a full local acceptance run (including the DB-failure
-and migration-failure scenarios). The conditions are operational, not design:
-provision the two GCP projects and run one live staging deploy + backup restore
-with real credentials, and resolve the runtime-host-ownership ADR (issue 6)
-before Phase 4 attaches a product runtime.
+**READY WITH CONDITIONS.** The infrastructure is complete and coherent, now
+**provider-portable** (VPS active reference, AWS supported mapping, GCP managed
+profile — one workload, one image, one set of migrations), and proven by static
+validation (15/15 Phase 3 + 12/12 portability), a full local acceptance run
+(DB-failure and migration-failure scenarios), and a VPS-style acceptance run.
+
+The conditions are operational, not design:
+
+- provision at least one target live and run a real deploy + backup restore with
+  real credentials (VPS is the cheapest first target; GCP/AWS as scale-up);
+- resolve the runtime-host-ownership ADR (issue 6) before Phase 4 attaches a
+  product runtime;
+- keep portability at the contract boundary — no cloud-abstraction framework
+  (debt item 10).
+
+Provider maturities are reported honestly and not claimed at parity beyond the
+workload: **VPS ACTIVE**, **AWS SUPPORTED ARCHITECTURE**, **GCP SUPPORTED MANAGED
+PROFILE** — none live-provisioned in this build.

@@ -51,7 +51,7 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
       - name: deploy
-        uses: ./.github/actions/deploy-env
+        uses: ./.github/actions/gcp-deploy
         with:
           environment: staging
           project_id: ${{ vars.GCP_PROJECT_STAGING }}
@@ -87,7 +87,7 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
       - name: deploy
-        uses: ./.github/actions/deploy-env
+        uses: ./.github/actions/gcp-deploy
         with:
           environment: production
           project_id: ${{ vars.GCP_PROJECT_PRODUCTION }}

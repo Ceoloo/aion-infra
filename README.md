@@ -1,121 +1,126 @@
 # aion-infra
 
-**The minimum secure, reproducible, recoverable production home for AION.**
+**The minimum secure, reproducible, recoverable — and provider-portable —
+production home for AION.**
 
 AION Infra is **Phase 3** of the AION architecture
 ([aion-docs/roadmap/build-order.md](https://github.com/Ceoloo/aion-docs/blob/main/roadmap/build-order.md)).
 Phases 1–2 produced a control-plane kernel ([AION Core](https://github.com/Ceoloo/aion-core))
-and a durable data layer ([AION Data](https://github.com/Ceoloo/aion-data)) that
-already survive a process restart against a local Postgres. Phase 3 moves that
-workload from *production-quality code + local database* to a *secure,
-reproducible, recoverable production environment* — and **no more** (aion-infra
-is justified by the workload that exists now, never by imagined scale;
-aion-docs/engineering/principles.md #1).
+and a durable data layer ([AION Data](https://github.com/Ceoloo/aion-data)).
+Phase 3 moves that workload from *production-quality code + local database* to a
+*secure, reproducible, recoverable production environment* — **and keeps it
+portable across a generic VPS, AWS, or GCP** (portability amendment), without
+rewriting Core, Data, or product code.
+
+> **AION is cloud-portable, not cloud-abstracted.** There is one AION workload;
+> cloud providers are deployment environments. We do not build a universal cloud
+> API — portability lives at one boundary, the
+> [deployment contract](contracts/deployment-contract.md). See
+> [docs/portability.md](docs/portability.md).
 
 ```
-        INTERNET
-           │  managed HTTPS/TLS
-           ▼
-   AION RUNTIME SERVICE  (Cloud Run — Core + Data client)
-           │  private VPC path, app role, TLS
-           ▼
-   MANAGED POSTGRES  (Cloud SQL for PostgreSQL 16)
-
-   supporting: Secret Manager · Cloud Logging/Monitoring · automated
-   backups + PITR · migration job · CI/CD with a production human gate
+   AION Core + AION Data + AION Runtime artifact
+                     │  one contract · one image · one set of migrations
+                     ▼
+        Provider-neutral deployment contract
+          │                │              │
+     VPS profile      AWS profile     GCP profile
+   Compose + Caddy   ECS/RDS/…       Cloud Run/SQL
+   (ACTIVE, cheap)   (SUPPORTED)     (SUPPORTED managed)
 ```
+
+## The workload contract (stable, provider-neutral)
+
+Every target runs the **same** container image, configured **only** by
+environment variables, against a **PostgreSQL 16-compatible** database reached by
+URL:
+
+```
+DATABASE_URL · AION_ENVIRONMENT · LOG_LEVEL · SERVICE_VERSION · GIT_SHA   → runtime
+MIGRATION_DATABASE_URL                                                     → migrations only
+GET /health/live · GET /health/ready · structured stdout logs · SIGTERM shutdown
+```
+
+Full contract: [contracts/deployment-contract.md](contracts/deployment-contract.md).
+
+## Deployment profiles
+
+| Profile | Runtime | Database | Status |
+|---|---|---|---|
+| **[VPS](providers/vps/README.md)** | Docker Compose + Caddy (auto-TLS) | local Postgres (Mode A) **or** managed URL (Mode B) | **ACTIVE / low-cost** |
+| **[AWS](providers/aws/README.md)** | ECS Fargate | RDS PostgreSQL 16 | **SUPPORTED architecture** (minimal TF, not provisioned) |
+| **[GCP](providers/gcp/README.md)** | Cloud Run | Cloud SQL PostgreSQL 16 | **SUPPORTED managed** (full TF, not provisioned) |
+
+The **workload** is at parity on all three (same image, migrations, health,
+config). Only the infrastructure differs — see the
+[capability matrix](docs/portability.md#provider-capability-matrix).
 
 ## What Phase 3 owns
 
-- **Declarative infrastructure** (Terraform) for **staging** and **production**,
-  reproducible from source, with separated remote state.
-- **Managed PostgreSQL 16** (Cloud SQL): private IP, encrypted, automated
-  backups + point-in-time recovery, production deletion protection.
-- **The Phase 2 two-role model** enforced: `aion_app` (DML only, no DDL,
-  append-only logs) and `aion_migrator` (DDL, migrations only).
-- **Managed secrets** (Secret Manager): per-environment, least-privilege access;
-  no secret in Git or Terraform state output.
-- **Least-privilege identities**: separate runtime, migration, CI/deploy, and
-  human-admin identities; keyless GitHub→GCP via Workload Identity Federation.
-- **Minimum runtime hosting** (Cloud Run): a thin reference host that boots the
-  real Core+Data workload, exposes health/readiness, logs structured JSON, and
-  identifies its release SHA.
+- **Declarative infrastructure** for each profile (Terraform for AWS/GCP;
+  Compose + scripts for VPS), reproducible from source, with separated state.
+- **PostgreSQL 16-compatible database**: encrypted, backups, PITR (managed) or
+  scheduled off-host encrypted dumps (VPS); never publicly exposed.
+- **The Phase 2 two-role model** enforced everywhere: `aion_app` (DML only,
+  append-only logs, no DDL) and `aion_migrator` (DDL, migrations only).
+- **Secret injection** per profile (env file / Secrets Manager / Secret Manager),
+  never committed; the runtime never holds the migration credential.
+- **Least-privilege identities**; keyless CI where the provider supports it.
+- **Minimum runtime hosting** via a thin, provider-neutral reference host.
 - **Controlled migrations** through AION Data's own runner (never a second
-  migration system), run migration-before-deploy and fail-closed.
-- **CI/CD**: PR validation + plan; automatic staging deploy; **human-gated**
-  production release.
-- **Health + logging**, **basic alerts**, and a **backup + restore** procedure.
+  system), migration-before-deploy and fail-closed.
+- **CI/CD** with a **human-gated** production release on every profile.
+- **Health + logging**, **basic alerts**, and **backup + restore** procedures.
 
-## What Phase 3 does NOT own (deliberate non-goals)
+## What Phase 3 does NOT own (non-goals)
 
-No Kubernetes, service mesh, brokers (Kafka/RabbitMQ), Redis, vector/warehouse
-stores, multi-region active-active, agent-runtime fleets, or any product/CRM
-schema. Business logic and orchestration decisions stay in Core; canonical data
-stays in Data (aion-docs/repositories/dependency-rules.md). See
-[docs/phase-3.md](docs/phase-3.md) for the full "not built" list and why.
-
-## Topology & environments
-
-| | Local | Staging | Production |
-|---|---|---|---|
-| Owner | developer | platform | platform |
-| Database | docker-compose Postgres (in aion-data) | Cloud SQL, zonal | Cloud SQL, **regional/HA** |
-| Deletion protection | — | off (rebuildable) | **on** |
-| Secrets | `.env` placeholders | Secret Manager (staging) | Secret Manager (production) |
-| Deploy | manual | **automatic** after merge to `main` | **human-gated** release |
-
-Full detail: [docs/environments.md](docs/environments.md),
-[docs/architecture.md](docs/architecture.md).
-
-## Provider / IaC
-
-**Google Cloud** (Cloud Run + Cloud SQL + Secret Manager + Cloud
-Logging/Monitoring + GCS remote state + Workload Identity Federation), chosen for
-minimum operational complexity for a single Node.js service + Postgres —
-serverless containers, no VM to patch, no Kubernetes. This is a new durable
-architectural decision recorded as a draft ADR (see
-[docs/phase-3.md](docs/phase-3.md) → "Provider decision"). Tooling is
-**Terraform**; the capability requirements — not vendor loyalty — drive it, and
-the design stays deliberately small.
+No Kubernetes, service mesh, brokers, Redis, vector/warehouse stores,
+multi-region active-active, agent-runtime fleets, product/CRM schema, or a
+cloud-abstraction framework. Business logic stays in Core; canonical data stays
+in Data (aion-docs/repositories/dependency-rules.md). Full list + rationale:
+[docs/phase-3.md](docs/phase-3.md).
 
 ## Repository layout
 
 ```
 aion-infra/
 ├── README.md · .gitignore · .env.example
-├── docs/            architecture, environments, security, networking, database,
-│                    deployment, observability, backup-recovery, runbook, phase-3
-├── terraform/
-│   ├── modules/     networking · database · secrets · runtime · observability
-│   └── environments/ bootstrap · staging · production   (separated remote state)
-├── runtime/         reference runtime host (deployability fixture; see its README)
-│   └── sql/grants.sql   canonical least-privilege grants (shipped in the image)
-├── scripts/         migrate · health-check · backup-verify · smoke-test
-├── policies/        CI guardrails + accepted limitations
-└── .github/         workflows (validate · deploy) + deploy-env composite action
+├── contracts/
+│   └── deployment-contract.md      the provider-neutral workload contract
+├── providers/
+│   ├── vps/     compose · Caddyfile · scripts (deploy/backup/restore/bootstrap) · system
+│   ├── aws/     README · architecture.md · terraform (minimal, validates)
+│   └── gcp/     README · terraform (modules + environments) · scripts (gcloud)
+├── runtime/     provider-neutral reference host (deployability fixture)
+│   └── sql/grants.sql   canonical least-privilege grants (in the image)
+├── scripts/     verify · portability-check · health-check · smoke-test  (neutral)
+├── docs/        architecture · environments · security · networking · database ·
+│                deployment · observability · backup-recovery · runbook ·
+│                portability · phase-3
+└── .github/     workflows (validate · deploy-gcp · deploy-vps) + gcp-deploy action
 ```
 
 ## Workflows
 
-- **Local**: run the reference runtime against the aion-data compose Postgres —
-  see [runtime/README.md](runtime/README.md).
-- **Staging**: merge to `main` → CI builds an immutable image → runs the
-  migration job → rolls the service → smoke-tests. [docs/deployment.md](docs/deployment.md).
-- **Production**: manual dispatch → **required-reviewer approval** (the human
-  gate) → same steps with production identity, from `main` only.
+- **Local**: run the reference runtime against a local Postgres — [runtime/README.md](runtime/README.md).
+- **VPS**: `providers/vps/scripts/deploy.sh` (pull → migrate fail-closed → roll →
+  readiness → smoke); CI over SSH via [deploy-vps.yml](.github/workflows/deploy-vps.yml).
+- **GCP**: merge to `main` → [deploy-gcp.yml](.github/workflows/deploy-gcp.yml)
+  (auto staging; human-gated production).
+- **AWS**: mapping + minimal Terraform; activation is a provider-activation
+  mission ([providers/aws/architecture.md](providers/aws/architecture.md)).
 
-## Security, backups, status
+## Verification
 
-- Security controls: [docs/security.md](docs/security.md),
-  [docs/networking.md](docs/networking.md).
-- Backups & recovery: [docs/backup-recovery.md](docs/backup-recovery.md).
-- Operational procedures: [docs/runbook.md](docs/runbook.md).
-- **Phase 3 scope, what was and was not built, limitations, costs, exit
-  criteria, and the Phase 4 recommendation:** [docs/phase-3.md](docs/phase-3.md).
+- **Phase 3 checks:** `scripts/verify.sh` → **15/15 pass**.
+- **Portability checks:** `scripts/portability-check.sh` → **12/12 pass**.
+- **Live (local Postgres):** migrations, app-role connect, health, boot smoke,
+  DB-failure readiness recovery, migration-failure fail-closed, role separation.
 
-> **Status:** Phase 3 infrastructure is **defined declaratively and verified by
-> static validation + a full local acceptance run** (migrations, app-role
-> connect, health, smoke, DB-failure readiness, migration-failure fail-closed,
-> role separation). **Live cloud provisioning of staging/production requires GCP
-> credentials and is a remaining operational step** — see
-> [docs/phase-3.md](docs/phase-3.md).
+## Status
+
+Phase 3 infrastructure is **defined declaratively for three profiles and verified
+by static validation + local acceptance runs**. GCP is fully specified; VPS is a
+working low-cost reference; AWS is a validated minimal mapping. **Live cloud
+provisioning of any profile requires that provider's credentials and is a
+remaining operational step** — see [docs/phase-3.md](docs/phase-3.md).

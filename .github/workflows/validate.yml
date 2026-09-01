@@ -26,14 +26,15 @@ jobs:
           terraform_wrapper: false
 
       - name: terraform fmt (check)
-        run: terraform fmt -check -recursive terraform
+        run: terraform fmt -check -recursive providers
 
-      - name: validate each stack
+      - name: validate each stack (all provider profiles)
         run: |
           set -euo pipefail
-          for dir in terraform/environments/bootstrap \
-                     terraform/environments/staging \
-                     terraform/environments/production; do
+          for dir in providers/gcp/terraform/environments/bootstrap \
+                     providers/gcp/terraform/environments/staging \
+                     providers/gcp/terraform/environments/production \
+                     providers/aws/terraform; do
             echo "::group::validate ${dir}"
             terraform -chdir="${dir}" init -backend=false -input=false
             terraform -chdir="${dir}" validate
@@ -48,7 +49,7 @@ jobs:
       - name: tfsec
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
-          working_directory: terraform
+          working_directory: providers
           soft_fail: true # advisory in Phase 3; documented in policies/README.md
 
   runtime:
@@ -94,7 +95,7 @@ jobs:
           terraform_version: 1.9.8
           terraform_wrapper: false
       - name: plan
-        working-directory: terraform/environments/staging
+        working-directory: providers/gcp/terraform/environments/staging
         env:
           TF_VAR_project_id: ${{ vars.GCP_PROJECT_STAGING }}
           TF_VAR_app_password: ${{ secrets.STAGING_APP_DB_PASSWORD }}

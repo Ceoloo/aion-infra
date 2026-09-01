@@ -4,7 +4,8 @@
  * The service refuses to boot if required production configuration is missing or
  * malformed, and never silently falls back to an insecure default
  * (aion-infra §41–42). Configuration comes from the environment/secrets, never
- * from source edits: DATABASE_URL is injected from Secret Manager by Cloud Run.
+ * from source edits: DATABASE_URL is injected from the platform's secret store
+ * into the environment (provider-neutral — see contracts/deployment-contract.md).
  */
 
 export type Environment = 'local' | 'staging' | 'production';

@@ -66,8 +66,8 @@ health check → smoke test
 ### Applying migrations
 
 - **CI**: the migration Cloud Run job runs automatically before each deploy.
-- **Manual/local**: `scripts/migrate.sh <env>` (cloud) or
-  `MODE=local MIGRATION_DATABASE_URL=... scripts/migrate.sh local`.
+- **Manual/local**: `providers/gcp/scripts/migrate.sh <env>` (cloud) or
+  `MODE=local MIGRATION_DATABASE_URL=... providers/gcp/scripts/migrate.sh local`.
 
 ## Connection strings
 

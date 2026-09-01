@@ -8,7 +8,7 @@ accepted limitations, recorded rather than hidden.
 
 | Check | Tool | Enforcement | Why |
 |---|---|---|---|
-| Terraform format | `terraform fmt -check` | **blocking** | Reviewable, consistent IaC (§9). |
+| Terraform format | `terraform fmt -check -recursive providers` | **blocking** | Reviewable, consistent IaC (§9). |
 | Terraform validate | `terraform validate` | **blocking** | Config is internally valid before plan/apply (§60 IAC_VALIDATE). |
 | IaC security scan | `tfsec` | advisory (soft-fail) | Surfaces misconfigurations; advisory in Phase 3, findings triaged here. |
 | Committed secrets | `gitleaks` | **blocking** | Enforces "no secrets in the repo — ever" (§14, §67, NO_PUBLIC_SECRET). |

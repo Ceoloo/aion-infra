@@ -1,0 +1,103 @@
+# ============================================================================
+# AION — generic Linux VPS deployment profile (Hostinger / DO / Hetzner / EC2).
+# ============================================================================
+# One server is enough (aion-infra amendment §9): a reverse proxy, the AION
+# runtime (the SAME image every provider uses), and an OPTIONAL local Postgres.
+# No Kubernetes/Swarm/Consul/Nomad/RabbitMQ/Redis.
+#
+#   Internet → Caddy (HTTPS, auto certs) → aion-runtime → PostgreSQL
+#
+# Database modes (see providers/vps/README.md):
+#   Mode A (local DB):   `docker compose --profile local-db up -d`
+#                         DATABASE_URL/MIGRATION_DATABASE_URL point at `postgres`.
+#   Mode B (managed DB): `docker compose up -d`  (no postgres service)
+#                         DATABASE_URL/MIGRATION_DATABASE_URL point at a managed
+#                         PostgreSQL — application unchanged.
+#
+# Secrets come from a root-owned 0600 env file (providers/vps/.env), never the
+# repo. Only the runtime's HTTP port is exposed — via Caddy. Postgres binds to
+# localhost only and is never published to the internet.
+
+name: aion
+
+services:
+  # ── Reverse proxy: HTTPS termination + automatic certificates ─────────────
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      aion-runtime:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data          # persisted certs
+      - caddy_config:/config
+    environment:
+      AION_DOMAIN: ${AION_DOMAIN:?set AION_DOMAIN in .env}
+    networks: [edge, internal]
+
+  # ── The AION runtime — the SAME immutable image used on AWS/GCP ───────────
+  aion-runtime:
+    image: ${AION_IMAGE:?set AION_IMAGE (…/aion-runtime:<git-sha>)}
+    restart: unless-stopped
+    # EXPLICIT allowlist (NOT env_file): the runtime receives ONLY the app-role
+    # contract vars. MIGRATION_DATABASE_URL is deliberately absent so the
+    # long-running runtime can never hold the DDL credential (contract §4;
+    # aion-infra §16–17). Values are interpolated from providers/vps/.env.
+    environment:
+      PORT: "8080"
+      AION_ENVIRONMENT: ${AION_ENVIRONMENT}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SERVICE_VERSION: ${SERVICE_VERSION:-unknown}
+      GIT_SHA: ${GIT_SHA:-unknown}
+      DATABASE_SSL: ${DATABASE_SSL:-true}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+    expose:
+      - "8080"                    # internal only; never published to the host
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    stop_grace_period: 30s        # allow graceful SIGTERM shutdown
+    networks: [internal]
+
+  # ── OPTIONAL local PostgreSQL (Mode A). Enable with --profile local-db ────
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["local-db"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set in .env for local-db}
+      POSTGRES_DB: ${POSTGRES_DB:-aion_data}
+      # Consumed by system/init-roles.sh at first boot to create the two
+      # least-privileged roles (the migrate step later applies grants.sql).
+      AION_APP_PASSWORD: ${AION_APP_PASSWORD:?set in .env for local-db}
+      AION_MIGRATOR_PASSWORD: ${AION_MIGRATOR_PASSWORD:?set in .env for local-db}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./system/init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro
+    # Bind to loopback ONLY — never exposed to the internet (§11, §15).
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+networks:
+  edge:
+  internal:
+    internal: false
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pgdata:

@@ -8,10 +8,10 @@ declarative; releases are controlled; production is deliberate.
 | Workflow | Trigger | Does |
 |---|---|---|
 | `validate.yml` | every PR + push to `main` | fmt, validate, tfsec (advisory), runtime typecheck/build, gitleaks, staging plan (if cloud auth configured) |
-| `deploy.yml` (staging) | push to `main` | build image → apply infra → migrate job → roll service → smoke |
-| `deploy.yml` (production) | manual dispatch, `main` only | **required-reviewer approval** → same steps with prod identity |
+| `deploy-gcp.yml` (staging) | push to `main` | build image → apply infra → migrate job → roll service → smoke |
+| `deploy-gcp.yml` (production) | manual dispatch, `main` only | **required-reviewer approval** → same steps with prod identity |
 
-Both environments deploy through the same `deploy-env` composite action, so they
+Both environments deploy through the same `gcp-deploy` composite action, so they
 behave identically (aion-infra §44).
 
 ## Release steps (per environment)
@@ -51,7 +51,7 @@ Remote state can't store the resources that create it, so `bootstrap` runs with 
 **local backend**, by a human, once:
 
 ```bash
-cd terraform/environments/bootstrap
+cd providers/gcp/terraform/environments/bootstrap
 terraform init                       # local backend
 terraform apply \
   -var project_id=<seed-project> \
@@ -69,7 +69,7 @@ state into a bucket afterward.
 ## First environment apply
 
 ```bash
-cd terraform/environments/staging
+cd providers/gcp/terraform/environments/staging
 terraform init -backend-config="bucket=<staging-tfstate-bucket>"
 TF_VAR_app_password=... TF_VAR_migrator_password=... \
   terraform apply -var project_id=<staging-project>

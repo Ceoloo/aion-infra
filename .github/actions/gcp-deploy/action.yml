@@ -35,7 +35,7 @@ runs:
     #    ignored by Terraform, so this does not fight the rollout below.
     - name: terraform apply
       shell: bash
-      working-directory: terraform/environments/${{ inputs.environment }}
+      working-directory: providers/gcp/terraform/environments/${{ inputs.environment }}
       env:
         TF_VAR_project_id: ${{ inputs.project_id }}
         TF_VAR_region: ${{ inputs.region }}

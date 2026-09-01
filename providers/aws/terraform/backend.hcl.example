@@ -1,0 +1,5 @@
+# Usage: terraform init -backend-config=backend.hcl  (real file git-ignored)
+bucket = "REPLACE_WITH_AWS_TFSTATE_BUCKET"
+key    = "aion/staging/terraform.tfstate"
+region = "us-east-1"
+# use_lockfile = true    # native S3 state locking (or set dynamodb_table = ...)

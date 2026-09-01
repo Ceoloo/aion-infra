@@ -12,21 +12,21 @@ Common variables: `PROJECT_ID` (per env), `REGION=us-central1`,
 Automatic on merge to `main`. Manual:
 
 ```bash
-gh workflow run deploy.yml -f target=staging   # or: git push origin main
+gh workflow run deploy-gcp.yml -f target=staging   # or: git push origin main
 ```
 
 ## Deploy production (human-gated)
 
 ```bash
-gh workflow run deploy.yml -f target=production   # from main only
+gh workflow run deploy-gcp.yml -f target=production   # from main only
 # → approve the 'production' Environment when GitHub requests a reviewer
 ```
 
 ## Run migrations
 
 ```bash
-PROJECT_ID=<env-project> scripts/migrate.sh <staging|production>
-# local:  MODE=local MIGRATION_DATABASE_URL=... scripts/migrate.sh local
+PROJECT_ID=<env-project> providers/gcp/scripts/migrate.sh <staging|production>
+# local:  MODE=local MIGRATION_DATABASE_URL=... providers/gcp/scripts/migrate.sh local
 ```
 
 A failed migration exits non-zero and does not proceed to deploy.
@@ -67,7 +67,7 @@ gcloud logging read '… AND (jsonPayload.message="readiness_failed" OR jsonPayl
 ```bash
 # 1. generate a new password (store in your secret manager of record / GH secret)
 # 2. apply — updates the Cloud SQL user + writes a NEW Secret Manager version:
-cd terraform/environments/<env>
+cd providers/gcp/terraform/environments/<env>
 terraform init -backend-config="bucket=<env-tfstate-bucket>"
 TF_VAR_app_password=<new> TF_VAR_migrator_password=<current-or-new> \
   terraform apply -var project_id=${PROJECT_ID}
@@ -82,7 +82,7 @@ App and migrator credentials rotate independently. See [security.md](security.md
 ```bash
 # verify a backup is recent, then clone-restore into an ISOLATED target + validate:
 PROJECT_ID=${PROJECT_ID} INSTANCE=${PREFIX}-pg MODE=restore REGION=${REGION} \
-  scripts/backup-verify.sh
+  providers/gcp/scripts/backup-verify.sh
 ```
 
 Never restore over production. For a real recovery, restore to a new instance,

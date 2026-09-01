@@ -1,0 +1,8 @@
+# AWS profile variables — copy to terraform.tfvars (git-ignored) or TF_VAR_*.
+region      = "us-east-1"
+environment = "staging"
+name_prefix = "aion-staging"
+# Passwords injected from CI secret material, NOT set here:
+#   export TF_VAR_app_password=...
+#   export TF_VAR_migrator_password=...
+# certificate_arn = "arn:aws:acm:...:certificate/..."   # for HTTPS/443
