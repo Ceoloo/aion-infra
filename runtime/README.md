@@ -29,11 +29,13 @@ The AION dependency rules say `aion-infra` does not depend on `aion-core` /
 `aion-data` **in code**. This reference host does import them — so it is
 deliberately scoped as a **verification fixture**, isolated in `runtime/` with
 its own `package.json`, and is **not** part of the Terraform-managed platform.
-Its production home (aion-core, or a dedicated `aion-runtime` repo) is an
-explicit **deferred architecture decision** — see `docs/phase-3.md` →
-"Architecture issues" and the draft ADR in the completion report. Phase 3 only
-establishes a secure place to run; it does not decide where the runtime's code
-ultimately lives (aion-infra §54).
+Its production home is now **decided** by
+[`docs/adr/ADR-0001-runtime-host-ownership.md`](../docs/adr/ADR-0001-runtime-host-ownership.md):
+a dedicated **`aion-runtime`** package/repo (depends on `@aion/core` +
+`@aion/data` downward; consumed by aion-infra only as an image). Until that
+package is created, this directory is the **interim fixture / seed** for it —
+kept minimal and provider-neutral. Phase 3 establishes the secure place to run
+and records where the runtime code will live (aion-infra §54).
 
 ## The deployment interface (contract)
 

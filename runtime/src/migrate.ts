@@ -2,7 +2,7 @@
  * Migration entrypoint — run by the migration JOB/one-off task (aion-infra §18),
  * a separate execution from the long-running runtime, NEVER by the runtime
  * itself. Each provider profile wires this entrypoint to its own one-off
- * execution primitive (see providers/*/); the code here names no provider.
+ * execution primitive (see the providers directory); the code names no provider.
  *
  * It applies aion-data's authoritative migration runner (no second migration
  * system is invented here — §18) using the MIGRATION identity's credential

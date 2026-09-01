@@ -177,13 +177,34 @@ aion-data, or product code — see [portability.md](portability.md) and
 `PORTABILITY_TESTS_PASS` — **all pass** (`scripts/portability-check.sh`). The
 amendment does not require all three providers to be live.
 
-**VPS acceptance (local):** the same runtime image entrypoints were run against a
-local PostgreSQL 16 (Docker daemon unavailable here): migrations applied,
-runtime booted as the app role, `/health/live` + `/health/ready` returned 200,
-the boot smoke lifecycle completed, the release SHA was reported, and the config
-guard rejected a runtime handed the migration URL. The Docker-Compose-on-a-real-
-VPS and live SSH-deploy steps are documented but not executed (no Docker/VPS
-here).
+**Gate closure — deploy sequence + backup/restore, run for real (Docker-free).**
+Two committed, re-runnable harnesses execute the actual logic against a real
+PostgreSQL 16 with the real built artifact (no Docker daemon / no VPS / no object
+storage in this environment, so the container, SSH, and remote-S3 wrappers are
+the only unexecuted legs):
+
+- `scripts/local-acceptance.sh` — the full **migrate → deploy → readiness →
+  smoke** sequence (contract §5). Observed: migrations applied by the migrator
+  identity + grants; runtime booted as the **app** role (migration URL removed
+  from its env); `/health/ready` 200; committed `scripts/smoke-test.sh` PASS with
+  the deployed `GIT_SHA` matched; boot lifecycle self-check completed. This is
+  the same sequence `providers/vps/scripts/deploy.sh` performs via Compose.
+- `scripts/backup-restore-selftest.sh` — the **encrypt → off-host → decrypt →
+  isolated-restore → validate** cycle (§32, §65) the VPS `backup.sh`/`restore.sh`
+  perform. Observed: `pg_dump | gzip | openssl aes-256-cbc` produced a genuine
+  ciphertext (`Salted__` header; plaintext-marker check passed) written to an
+  off-host directory; decrypt + restore into a **separate isolated database**
+  yielded **7/7 canonical tables** and the `schema_migrations` row; the isolated
+  target was torn down. It never touched the source DB.
+
+Also fixed a build-breaker introduced by the amendment: a `*/` inside a
+`runtime/src/migrate.ts` doc comment had terminated the block early (the runtime
+now typechecks and builds clean; `local-acceptance.sh` builds it as step 0).
+
+Still requiring real infrastructure (unchanged in nature, narrowed in scope):
+Docker-Compose-on-a-real-VPS, live SSH deploy, and upload to a remote
+S3-compatible endpoint — none available here. The logic each wraps is proven
+above.
 
 ## Architecture issues
 
@@ -197,16 +218,15 @@ here).
 
 ### Newly surfaced in Phase 3
 
-6. **Runtime host ownership is undecided.** The reference host imports
-   `@aion/core`/`@aion/data`, which the dependency rules forbid *infra* code from
-   doing. It stays scoped as an isolated verification **fixture** (not
-   Terraform-managed platform code), and the portability amendment kept it
-   minimal and provider-neutral (no cloud SDK, no expanded responsibilities —
-   amendment §35). Its production home — `aion-core/runtime`, a dedicated
-   `aion-runtime` package/repo, or an `aion-products` composition root — remains
-   an open decision that this repo may not make silently. **Recommendation: a
-   durable ADR in aion-docs (drafted in the completion report) before Phase 4
-   wires a real product runtime.**
+6. **Runtime host ownership — RESOLVED** by
+   [ADR-0001](adr/ADR-0001-runtime-host-ownership.md): the host's canonical home
+   is a **dedicated `aion-runtime` package/repo** that depends on `@aion/core` +
+   `@aion/data` downward (allowed) and is consumed by `aion-infra` only as an
+   image. `aion-core/runtime` was rejected (core must stay database-agnostic) and
+   `aion-products` was rejected (the platform runtime is not a product). Until
+   `aion-runtime` is created, `aion-infra/runtime/` remains the interim fixture,
+   kept minimal and provider-neutral. The ADR should be ratified into aion-docs
+   (ready-to-copy body in the ADR file); aion-infra does not modify aion-docs.
 7. **DB privilege bootstrapping on managed Postgres.** `grants.sql`'s
    database/schema-level `GRANT`s require the migrator to own the DB/schema; the
    substantive per-table least-privilege holds regardless, but the ownership
@@ -264,14 +284,18 @@ profile — one workload, one image, one set of migrations), and proven by stati
 validation (15/15 Phase 3 + 12/12 portability), a full local acceptance run
 (DB-failure and migration-failure scenarios), and a VPS-style acceptance run.
 
-The conditions are operational, not design:
+The runtime-host-ownership ADR is now **resolved**
+([ADR-0001](adr/ADR-0001-runtime-host-ownership.md): a dedicated `aion-runtime`
+package). The deploy sequence and backup/restore are proven for real against a
+live PostgreSQL via the two committed harnesses. The remaining conditions are
+purely infrastructure-availability, not design:
 
-- provision at least one target live and run a real deploy + backup restore with
-  real credentials (VPS is the cheapest first target; GCP/AWS as scale-up);
-- resolve the runtime-host-ownership ADR (issue 6) before Phase 4 attaches a
-  product runtime;
+- stand up one real target (a VPS with Docker + SSH, plus an S3-compatible
+  bucket) and run `providers/vps/scripts/deploy.sh` + `backup.sh`/`restore.sh`
+  there — the only unexecuted legs are the container/SSH/remote-S3 wrappers;
 - keep portability at the contract boundary — no cloud-abstraction framework
-  (debt item 10).
+  (debt item 10);
+- ratify ADR-0001 into aion-docs and, when convenient, extract `aion-runtime`.
 
 Provider maturities are reported honestly and not claimed at parity beyond the
 workload: **VPS ACTIVE**, **AWS SUPPORTED ARCHITECTURE**, **GCP SUPPORTED MANAGED

@@ -34,3 +34,7 @@ runtime/vendor/
 Thumbs.db
 .idea/
 .vscode/
+
+# Local acceptance / self-test scratch (never committed)
+.acceptance*
+.backups/
