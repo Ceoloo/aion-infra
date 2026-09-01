@@ -1,0 +1,98 @@
+name: deploy
+
+# Controlled deployment (aion-infra §24–26). Staging deploys automatically after
+# a merge to main; PRODUCTION requires a deliberate human approval via the
+# GitHub Environment protection rule (the human gate — §25, §64) and only ever
+# runs from main. No AI worker can independently release to production.
+#
+# Order is migration-BEFORE-deploy (§18): apply infra → build immutable image →
+# run the migration JOB (halts on failure) → roll the service to the new image →
+# smoke test. A failed migration stops the job before the runtime is updated,
+# leaving the existing revision serving (§46, §63).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Environment to deploy
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGION: us-central1
+  TF_VERSION: 1.9.8
+
+jobs:
+  # ── Staging: automatic after merge to main ────────────────────────────────
+  staging:
+    name: deploy staging
+    if: github.event_name == 'push' || github.event.inputs.target == 'staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT_STAGING }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: deploy
+        uses: ./.github/actions/deploy-env
+        with:
+          environment: staging
+          project_id: ${{ vars.GCP_PROJECT_STAGING }}
+          region: ${{ env.REGION }}
+          state_bucket: ${{ vars.GCP_TFSTATE_BUCKET_STAGING }}
+          app_password: ${{ secrets.STAGING_APP_DB_PASSWORD }}
+          migrator_password: ${{ secrets.STAGING_MIGRATOR_DB_PASSWORD }}
+          git_sha: ${{ github.sha }}
+
+  # ── Production: manual, human-gated, main only ─────────────────────────────
+  production:
+    name: deploy production
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'production'
+    runs-on: ubuntu-latest
+    # This Environment MUST have a required-reviewers protection rule configured
+    # in GitHub → the human gate. The job pauses here until a human approves.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: refuse non-main refs
+        run: |
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "production deploys only from main (got ${GITHUB_REF})" >&2
+            exit 1
+          fi
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT_PRODUCTION }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: deploy
+        uses: ./.github/actions/deploy-env
+        with:
+          environment: production
+          project_id: ${{ vars.GCP_PROJECT_PRODUCTION }}
+          region: ${{ env.REGION }}
+          state_bucket: ${{ vars.GCP_TFSTATE_BUCKET_PRODUCTION }}
+          app_password: ${{ secrets.PRODUCTION_APP_DB_PASSWORD }}
+          migrator_password: ${{ secrets.PRODUCTION_MIGRATOR_DB_PASSWORD }}
+          git_sha: ${{ github.sha }}

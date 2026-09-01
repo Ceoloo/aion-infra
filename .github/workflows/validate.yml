@@ -1,0 +1,104 @@
+name: validate
+
+# PR validation for infrastructure changes (aion-infra §23). It NEVER applies —
+# format → lint → IaC validate → runtime typecheck/build → plan. Plans run only
+# when cloud credentials are configured (repo has WIF vars); otherwise the
+# credential-free checks still gate every PR.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write # for optional plan via Workload Identity Federation
+  pull-requests: write
+
+jobs:
+  terraform:
+    name: terraform fmt · validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: terraform fmt (check)
+        run: terraform fmt -check -recursive terraform
+
+      - name: validate each stack
+        run: |
+          set -euo pipefail
+          for dir in terraform/environments/bootstrap \
+                     terraform/environments/staging \
+                     terraform/environments/production; do
+            echo "::group::validate ${dir}"
+            terraform -chdir="${dir}" init -backend=false -input=false
+            terraform -chdir="${dir}" validate
+            echo "::endgroup::"
+          done
+
+  tfsec:
+    name: IaC static security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: terraform
+          soft_fail: true # advisory in Phase 3; documented in policies/README.md
+
+  runtime:
+    name: runtime typecheck · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: vendor + build workload
+        working-directory: runtime
+        run: |
+          node scripts/setup-deps.mjs
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm run build
+
+  secret-scan:
+    name: no committed secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  plan:
+    name: terraform plan (staging)
+    runs-on: ubuntu-latest
+    needs: [terraform]
+    # Plans require cloud auth; only run when WIF is configured for the repo.
+    if: vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT_STAGING }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+      - name: plan
+        working-directory: terraform/environments/staging
+        env:
+          TF_VAR_project_id: ${{ vars.GCP_PROJECT_STAGING }}
+          TF_VAR_app_password: ${{ secrets.STAGING_APP_DB_PASSWORD }}
+          TF_VAR_migrator_password: ${{ secrets.STAGING_MIGRATOR_DB_PASSWORD }}
+        run: |
+          terraform init -backend-config="bucket=${{ vars.GCP_TFSTATE_BUCKET_STAGING }}"
+          terraform plan -input=false -no-color

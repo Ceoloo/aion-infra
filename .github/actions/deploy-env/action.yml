@@ -1,0 +1,91 @@
+name: deploy-env
+description: >-
+  Build the immutable runtime image, apply infra, run the migration job
+  (migration-before-deploy, halts on failure), roll the Cloud Run service to the
+  new image, then smoke-test. Shared by staging and production so the two
+  environments deploy the SAME way (aion-infra §44).
+
+inputs:
+  environment:
+    required: true
+  project_id:
+    required: true
+  region:
+    required: true
+  state_bucket:
+    required: true
+  app_password:
+    required: true
+  migrator_password:
+    required: true
+  git_sha:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve names
+      shell: bash
+      run: |
+        echo "PREFIX=aion-${{ inputs.environment }}" >> "$GITHUB_ENV"
+        echo "IMAGE=${{ inputs.region }}-docker.pkg.dev/${{ inputs.project_id }}/aion-${{ inputs.environment }}-images/aion-runtime:${{ inputs.git_sha }}" >> "$GITHUB_ENV"
+        echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+    # 1) Infra is declarative and applied first (idempotent). Image changes are
+    #    ignored by Terraform, so this does not fight the rollout below.
+    - name: terraform apply
+      shell: bash
+      working-directory: terraform/environments/${{ inputs.environment }}
+      env:
+        TF_VAR_project_id: ${{ inputs.project_id }}
+        TF_VAR_region: ${{ inputs.region }}
+        TF_VAR_app_password: ${{ inputs.app_password }}
+        TF_VAR_migrator_password: ${{ inputs.migrator_password }}
+        TF_VAR_git_sha: ${{ inputs.git_sha }}
+        TF_VAR_build_time: ${{ env.BUILD_TIME }}
+      run: |
+        terraform init -backend-config="bucket=${{ inputs.state_bucket }}"
+        terraform apply -input=false -auto-approve
+
+    # 2) Build the immutable, SHA-tagged image and push to Artifact Registry.
+    - name: build + push image
+      shell: bash
+      working-directory: runtime
+      run: |
+        gcloud auth configure-docker ${{ inputs.region }}-docker.pkg.dev --quiet
+        docker build \
+          --build-arg AION_CORE_REF="${AION_CORE_REF:-}" \
+          --build-arg AION_DATA_REF="${AION_DATA_REF:-}" \
+          -t "${IMAGE}" .
+        docker push "${IMAGE}"
+
+    # 3) Migration-BEFORE-deploy. Point the job at the new image, execute, WAIT.
+    #    A failed migration returns non-zero here and stops the deploy — the
+    #    currently-serving revision is left intact (§46, §63).
+    - name: run migrations (job)
+      shell: bash
+      run: |
+        gcloud run jobs update "${PREFIX}-migrate" \
+          --project "${{ inputs.project_id }}" --region "${{ inputs.region }}" \
+          --image "${IMAGE}"
+        gcloud run jobs execute "${PREFIX}-migrate" \
+          --project "${{ inputs.project_id }}" --region "${{ inputs.region }}" --wait
+
+    # 4) Roll the service to the new image (managed TLS, health-gated by probes).
+    - name: deploy runtime
+      shell: bash
+      run: |
+        gcloud run services update "${PREFIX}-runtime" \
+          --project "${{ inputs.project_id }}" --region "${{ inputs.region }}" \
+          --image "${IMAGE}"
+
+    # 5) Non-destructive smoke test against the deployed revision.
+    - name: smoke test
+      shell: bash
+      run: |
+        URL="$(gcloud run services describe "${PREFIX}-runtime" \
+          --project '${{ inputs.project_id }}' --region '${{ inputs.region }}' \
+          --format 'value(status.url)')"
+        TOKEN="$(gcloud auth print-identity-token)"
+        URL="${URL}" TOKEN="${TOKEN}" EXPECTED_SHA="${{ inputs.git_sha }}" \
+          scripts/smoke-test.sh

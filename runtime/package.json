@@ -1,0 +1,28 @@
+{
+  "name": "@aion/infra-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AION Infra reference runtime host — a THIN deployability fixture that boots AION Core over AION Data's durable Postgres adapters, exposes health/readiness, and proves the Phase 3 infrastructure can run the real workload. NOT a product; see runtime/README.md.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "setup:deps": "node scripts/setup-deps.mjs",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "migrate": "node dist/migrate.js"
+  },
+  "dependencies": {
+    "@aion/core": "file:vendor/aion-core",
+    "@aion/data": "file:vendor/aion-data",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.2"
+  }
+}

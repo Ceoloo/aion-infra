@@ -1,0 +1,9 @@
+# PRODUCTION variables — copy to terraform.tfvars (git-ignored) or supply via
+# TF_VAR_* env in CI. NEVER put real passwords in a committed file.
+project_id         = "aion-prod-REPLACE"
+region             = "us-central1"
+notification_email = "ops@example.com"
+
+# Passwords injected from CI secret material, NOT set here:
+#   export TF_VAR_app_password=...
+#   export TF_VAR_migrator_password=...

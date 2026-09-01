@@ -1,0 +1,4 @@
+# Copy considerations: this file holds NO secrets (just the state bucket name),
+# but the real backend.hcl is git-ignored to keep environment wiring out of VCS.
+# Usage: terraform init -backend-config=backend.hcl
+bucket = "REPLACE_WITH_STAGING_TFSTATE_BUCKET"

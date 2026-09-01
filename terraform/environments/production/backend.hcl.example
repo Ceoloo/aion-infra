@@ -1,0 +1,2 @@
+# Usage: terraform init -backend-config=backend.hcl  (real file git-ignored)
+bucket = "REPLACE_WITH_PRODUCTION_TFSTATE_BUCKET"

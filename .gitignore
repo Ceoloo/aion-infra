@@ -1,0 +1,36 @@
+# ── Secrets (NEVER commit — aion-docs/architecture/security-model.md) ────────
+.env
+.env.*
+!.env.example
+*.tfvars
+!*.tfvars.example
+backend.hcl
+!backend.hcl.example
+*.pem
+*.key
+*-key.json
+credentials.json
+
+# ── Terraform ────────────────────────────────────────────────────────────────
+.terraform/
+.terraform.tfstate.lock.info
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+tfplan
+*.tfplan
+
+# ── Node / runtime fixture ───────────────────────────────────────────────────
+node_modules/
+runtime/dist/
+runtime/vendor/
+*.log
+
+# ── OS / editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
