@@ -28,7 +28,7 @@ variable "migrator_password" {
 variable "image" {
   type        = string
   description = "Runtime image (…/aion-runtime:<sha>). Defaults to an inert placeholder for plan."
-  default     = "us-docker.pkg.dev/cloudrun/container/hello"
+  default     = "ghcr.io/ceoloo/aion-runtime:latest"
 }
 
 variable "service_version" {

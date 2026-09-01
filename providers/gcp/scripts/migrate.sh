@@ -26,8 +26,13 @@ fi
 
 if [[ "${MODE}" == "local" ]]; then
   : "${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL for local mode}"
-  echo "[migrate] local: applying migrations + grants via reference runtime entrypoint"
-  ( cd "$(dirname "$0")/../../../runtime" && node dist/migrate.js )
+  IMAGE="${AION_IMAGE:-ghcr.io/ceoloo/aion-runtime:latest}"
+  echo "[migrate] local: applying migrations + grants via the aion-runtime image (${IMAGE})"
+  # Consume the aion-runtime image (ADR-002) — aion-infra builds no runtime.
+  docker run --rm \
+    -e MIGRATION_DATABASE_URL="${MIGRATION_DATABASE_URL}" \
+    -e DATABASE_SSL="${DATABASE_SSL:-true}" \
+    "${IMAGE}" node dist/migrate.js
   echo "[migrate] local complete"
   exit 0
 fi

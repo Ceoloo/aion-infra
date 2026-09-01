@@ -37,12 +37,16 @@ locals {
   }
 }
 
+# OPTIONAL private mirror. The deployed runtime image comes from the aion-runtime
+# repo's GHCR image by default (var.image → ghcr.io/ceoloo/aion-runtime:<tag>;
+# Cloud Run pulls public GHCR directly — ADR-002). This registry exists only if
+# an org prefers to mirror that image privately; nothing here builds an image.
 resource "google_artifact_registry_repository" "images" {
   project       = var.project_id
   location      = var.region
   repository_id = "${var.name_prefix}-images"
   format        = "DOCKER"
-  description   = "Immutable AION runtime images (tagged by commit SHA)."
+  description   = "Optional private mirror of the aion-runtime image (default source is GHCR)."
   labels        = local.labels
 }
 

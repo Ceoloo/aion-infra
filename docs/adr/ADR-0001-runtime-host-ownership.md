@@ -1,14 +1,17 @@
 # ADR-0001: AION Runtime Host Ownership
 
-- **Status:** Accepted
+- **Status:** Accepted — **implemented** (extracted to
+  [Ceoloo/aion-runtime](https://github.com/Ceoloo/aion-runtime); the
+  `aion-infra/runtime/` fixture is removed and all provider profiles consume the
+  aion-runtime image). Ratified into the constitution as **aion-docs ADR-002**
+  (PR: Ceoloo/aion-docs#2).
 - **Date:** 2026-09-01
 - **Decision owner:** Ceoloo (Founder / CEO)
 - **Scope:** cross-repo (aion-infra + aion-core + aion-data + aion-docs). This
-  copy is the aion-infra record; it should be ratified into `aion-docs/adr/`
-  (draft body below) since it shapes a cross-repo boundary. aion-infra does not
-  modify aion-docs.
+  copy is the aion-infra record; the ratified constitutional version is
+  aion-docs ADR-002.
 - **Supersedes:** Phase 3 architecture-debt item 6 ("runtime host ownership
-  undecided"), which is now **resolved**.
+  undecided"), now **resolved and implemented**.
 
 ## Context
 

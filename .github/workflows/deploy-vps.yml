@@ -1,9 +1,10 @@
 name: deploy-vps
 
-# VPS deployment path (aion-infra amendment §13): build the SAME immutable
-# runtime image, push it to a registry, then deploy over SSH. Production
-# preserves the human gate via a GitHub Environment required-reviewers rule.
-# No private SSH key is exposed beyond the Environment secret it lives in.
+# VPS deployment path (aion-infra amendment §13). The runtime IMAGE is built and
+# published by the aion-runtime repo (ADR-002); aion-infra CONSUMES it — it does
+# not build it. This workflow deploys a given aion-runtime image over SSH.
+# Production preserves the human gate via a GitHub Environment required-reviewers
+# rule. No private SSH key is exposed beyond the Environment secret it lives in.
 on:
   workflow_dispatch:
     inputs:
@@ -12,42 +13,20 @@ on:
         type: choice
         options: [staging, production]
         default: staging
+      runtime_image:
+        description: aion-runtime image to deploy (default = latest published)
+        default: ghcr.io/ceoloo/aion-runtime:latest
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: deploy-vps-${{ github.event.inputs.environment }}
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: build + push image
-    runs-on: ubuntu-latest
-    outputs:
-      image: ${{ steps.meta.outputs.image }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: meta
-        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/aion-runtime:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: runtime
-          push: true
-          tags: ${{ steps.meta.outputs.image }}
-          build-args: |
-            AION_CORE_REF=${{ vars.AION_CORE_REF }}
-            AION_DATA_REF=${{ vars.AION_DATA_REF }}
-
   deploy:
     name: deploy over SSH
-    needs: build
     runs-on: ubuntu-latest
     # For production this Environment MUST carry a required-reviewers rule — the
     # human gate (contract §5; aion-infra §13, §25). Approval pauses the job.
@@ -68,10 +47,9 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/aion
-            # write the new image tag into .env without exposing other secrets
+            # Point .env at the chosen aion-runtime image + record its tag as GIT_SHA.
             sudo sed -i "s#^AION_IMAGE=.*#AION_IMAGE=${DEPLOY_IMAGE}#" .env
-            sudo sed -i "s#^GIT_SHA=.*#GIT_SHA=${GITHUB_SHA}#" .env
+            sudo sed -i "s#^GIT_SHA=.*#GIT_SHA=${DEPLOY_IMAGE##*:}#" .env
             ./scripts/deploy.sh
         env:
-          DEPLOY_IMAGE: ${{ needs.build.outputs.image }}
-          GITHUB_SHA: ${{ github.sha }}
+          DEPLOY_IMAGE: ${{ github.event.inputs.runtime_image }}

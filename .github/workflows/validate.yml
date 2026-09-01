@@ -1,7 +1,7 @@
 name: validate
 
 # PR validation for infrastructure changes (aion-infra §23). It NEVER applies —
-# format → lint → IaC validate → runtime typecheck/build → plan. Plans run only
+# format → IaC validate → infra portability + verify → secret scan → plan. Plans run only
 # when cloud credentials are configured (repo has WIF vars); otherwise the
 # credential-free checks still gate every PR.
 on:
@@ -52,21 +52,21 @@ jobs:
           working_directory: providers
           soft_fail: true # advisory in Phase 3; documented in policies/README.md
 
-  runtime:
-    name: runtime typecheck · build
+  # The runtime host is built + tested in the aion-runtime repo's own CI
+  # (ADR-002). aion-infra consumes its image, so there is no runtime build here.
+  portability:
+    name: infra portability + verification
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: hashicorp/setup-terraform@v3
         with:
-          node-version: 20
-      - name: vendor + build workload
-        working-directory: runtime
-        run: |
-          node scripts/setup-deps.mjs
-          npm install --no-audit --no-fund
-          npm run typecheck
-          npm run build
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+      - name: portability-check (cross-profile neutrality)
+        run: bash scripts/portability-check.sh
+      - name: verify (infra Phase 3 checks)
+        run: bash scripts/verify.sh
 
   secret-scan:
     name: no committed secrets

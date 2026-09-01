@@ -44,10 +44,11 @@ per-environment values and **separate remote state**.
 ## How the workload maps on
 
 AION Core is a kernel and AION Data a persistence package — neither is a
-long-running service. The **reference runtime host** (`runtime/`) is the thin
-process that makes them deployable: it builds a real `Orchestrator` (Core) wired
-to `createDataLayer` (Data) over Cloud SQL, exactly as aion-data's own
-integration harness does. The infrastructure's job is to run *that* safely:
+long-running service. The **runtime host** — owned by the
+[aion-runtime](https://github.com/Ceoloo/aion-runtime) repo (ADR-002) and
+delivered to infra as one image — is the thin process that makes them deployable:
+it builds a real `Orchestrator` (Core) wired to `createDataLayer` (Data) over
+Postgres. The infrastructure's job is to run *that image* safely:
 
 - inject the app-role `DATABASE_URL` from Secret Manager;
 - reach the private database over Direct VPC egress with TLS;
@@ -65,9 +66,10 @@ identity and AION Data's own runner — the runtime never carries DDL rights.
 - **Canonical data stays in aion-data**: this repo forks no schema; the DB
   module provisions the instance and roles, and AION Data's migrations remain
   authoritative for shape.
-- **The reference host is a fixture, not owned platform code** — see
-  [runtime/README.md](../runtime/README.md) and the boundary note in
-  [phase-3.md](phase-3.md).
+- **The runtime host is owned by aion-runtime, not infra** — infra consumes its
+  image and never imports Core/Data code (ADR-002). See
+  [adr/ADR-0001-runtime-host-ownership.md](adr/ADR-0001-runtime-host-ownership.md)
+  and the boundary note in [phase-3.md](phase-3.md).
 
 ## Environment boundaries
 

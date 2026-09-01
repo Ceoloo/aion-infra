@@ -38,12 +38,12 @@ stays portable in spirit (portable PostgreSQL, containerized runtime).
 - **Managed Postgres 16**: private IP, encrypted, daily backups + PITR,
   deletion protection (prod), maintenance window, HA (prod).
 - **Two-role least privilege**: `aion_app` (DML, append-only logs, no DDL) and
-  `aion_migrator` (DDL) — enforced by `runtime/sql/grants.sql`.
+  `aion_migrator` (DDL) — enforced by `grants.sql` (in the aion-runtime image).
 - **Managed secrets**: Secret Manager connection strings, least-privilege IAM,
   no plaintext outputs, documented rotation.
 - **Least-privilege identities**: runtime / migration / CI / human, keyless CI
   via WIF, production CI bound to `main`.
-- **Reference runtime host** (`runtime/`): boots real Core over real Data over
+- **Runtime host** (now the [aion-runtime](https://github.com/Ceoloo/aion-runtime) repo, extracted per ADR-002): boots real Core over real Data over
   Postgres; config fail-fast; health/readiness; structured JSON logs; release
   metadata; boot smoke; graceful shutdown; multi-stage non-root Dockerfile.
 - **Controlled migrations**: separate Cloud Run job, aion-data's own runner,
@@ -65,10 +65,20 @@ future mission + likely ADR.
 
 ## Verification (§60–65)
 
-All credential-free checks are automated in `scripts/verify.sh` (**15/15 pass**).
-Several were additionally proven **live against a real local PostgreSQL 16**
-during the build (Docker was unavailable, so a local `postgresql-16` cluster
-stood in for Cloud SQL):
+> **Post-extraction note (Phase 3.5):** the table below records the ORIGINAL
+> Phase 3 build, when the runtime host lived in `aion-infra/runtime/`. After the
+> runtime was extracted to the aion-runtime repo (see "Phase 3.5" below), the
+> runtime-SOURCE checks (RUNTIME_CONFIG_VALIDATION, DATABASE_CONNECTIVITY, and the
+> `runtime/src` parts of HEALTH_CHECK/MIGRATION/SMOKE) moved to **aion-runtime's
+> CI** (portability 9/9 + a full migrate→deploy→readiness→smoke acceptance on an
+> ephemeral Postgres, green). The aion-infra harness is now **`verify.sh` 14/14 +
+> `portability-check.sh` 10/10** (IaC, DB provisioning + roles, provider-level
+> migration/health, backups, human gate, image consumption, no secrets).
+
+All credential-free checks are automated in `scripts/verify.sh`. Several were
+additionally proven **live against a real local PostgreSQL 16** during the build
+(Docker was unavailable, so a local `postgresql-16` cluster stood in for Cloud
+SQL):
 
 | Check | Result | Evidence |
 |---|---|---|
@@ -161,7 +171,7 @@ aion-data, or product code — see [portability.md](portability.md) and
   mapping + minimal, `validate`-passing Terraform (ECS Fargate, RDS 16, Secrets
   Manager, ECR, CloudWatch, ALB, GitHub OIDC) with the same runtime/migration
   separation. Not provisioned.
-- **Same artifact / same migrations.** One `runtime/Dockerfile`; every profile
+- **Same artifact / same migrations.** One image (built by aion-runtime); every profile
   consumes an image variable and runs the same aion-data migrate entrypoint.
   The runtime imports no cloud SDK; provider comments were removed from the app.
 - **Portability tests.** `scripts/portability-check.sh` — **12/12 pass** (no
@@ -206,6 +216,33 @@ Docker-Compose-on-a-real-VPS, live SSH deploy, and upload to a remote
 S3-compatible endpoint — none available here. The logic each wraps is proven
 above.
 
+## Phase 3.5 — Runtime extraction (aion-runtime)
+
+Closing the platform boundary before the first product. Per
+[ADR-0001](adr/ADR-0001-runtime-host-ownership.md) / aion-docs ADR-002:
+
+- **Created** [Ceoloo/aion-runtime](https://github.com/Ceoloo/aion-runtime) and
+  moved the runtime host there **unchanged** (config, logger, control-plane,
+  server, smoke, index, migrate, `sql/grants.sql`, Dockerfile, setup-deps). It
+  depends on `@aion/core` + `@aion/data` downward and imports no cloud SDK.
+- **aion-runtime CI is green** (typecheck · build · portability 9/9 · acceptance
+  migrate→deploy→readiness→smoke on ephemeral Postgres) and **publishes the one
+  image** `ghcr.io/ceoloo/aion-runtime:<sha>`/`:latest`.
+- **Removed `aion-infra/runtime/`.** Every provider profile (VPS/AWS/GCP) now
+  **consumes** that image; the deploy pipelines build nothing (Cloud Run and ECS
+  pull the public GHCR image; the VPS pulls it). The AR/ECR repos remain only as
+  optional private mirrors.
+- **Verification repointed:** runtime-source checks live in aion-runtime; the
+  aion-infra harness is `verify.sh` 14/14 + `portability-check.sh` 10/10, and all
+  four Terraform stacks (3 GCP + AWS) still `fmt`/`validate`.
+- **Constitution** updated: aion-docs ADR-002 records the six-repo model and adds
+  Phase 3.5 to the build order (PR Ceoloo/aion-docs#2).
+
+With this, **Docs → Core → Data → Infra → Runtime** is the completed platform
+foundation; Phase 4 (first product) is authorized. Standing up the first real
+deployment (e.g. a Hostinger VPS) is an operational activation milestone, not an
+architecture phase.
+
 ## Architecture issues
 
 ### Carried forward from Phase 2 (unchanged — not "fixed" in Infra, §68)
@@ -218,15 +255,15 @@ above.
 
 ### Newly surfaced in Phase 3
 
-6. **Runtime host ownership — RESOLVED** by
-   [ADR-0001](adr/ADR-0001-runtime-host-ownership.md): the host's canonical home
-   is a **dedicated `aion-runtime` package/repo** that depends on `@aion/core` +
-   `@aion/data` downward (allowed) and is consumed by `aion-infra` only as an
-   image. `aion-core/runtime` was rejected (core must stay database-agnostic) and
-   `aion-products` was rejected (the platform runtime is not a product). Until
-   `aion-runtime` is created, `aion-infra/runtime/` remains the interim fixture,
-   kept minimal and provider-neutral. The ADR should be ratified into aion-docs
-   (ready-to-copy body in the ADR file); aion-infra does not modify aion-docs.
+6. **Runtime host ownership — RESOLVED & IMPLEMENTED** by
+   [ADR-0001](adr/ADR-0001-runtime-host-ownership.md): the host now lives in the
+   **[aion-runtime](https://github.com/Ceoloo/aion-runtime)** repo (depends on
+   `@aion/core` + `@aion/data` downward; consumed by `aion-infra` only as an
+   image). `aion-core/runtime` was rejected (core must stay database-agnostic) and
+   `aion-products` was rejected (the platform runtime is not a product). The
+   `aion-infra/runtime/` fixture has been **removed** and every provider profile
+   consumes `ghcr.io/ceoloo/aion-runtime`. Ratified into the constitution as
+   aion-docs ADR-002 (PR Ceoloo/aion-docs#2). See "Phase 3.5" below.
 7. **DB privilege bootstrapping on managed Postgres.** `grants.sql`'s
    database/schema-level `GRANT`s require the migrator to own the DB/schema; the
    substantive per-table least-privilege holds regardless, but the ownership

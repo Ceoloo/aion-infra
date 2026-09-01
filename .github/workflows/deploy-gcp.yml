@@ -5,10 +5,11 @@ name: deploy
 # GitHub Environment protection rule (the human gate — §25, §64) and only ever
 # runs from main. No AI worker can independently release to production.
 #
-# Order is migration-BEFORE-deploy (§18): apply infra → build immutable image →
-# run the migration JOB (halts on failure) → roll the service to the new image →
-# smoke test. A failed migration stops the job before the runtime is updated,
-# leaving the existing revision serving (§46, §63).
+# The runtime IMAGE is built and published by the aion-runtime repo (ADR-002);
+# aion-infra CONSUMES it — it does not build it. Order is migration-BEFORE-deploy
+# (§18): apply infra → run the migration JOB on the aion-runtime image (halts on
+# failure) → roll the service → smoke test. A failed migration stops the job
+# before the runtime is updated, leaving the existing revision serving (§46, §63).
 on:
   push:
     branches: [main]
@@ -19,6 +20,9 @@ on:
         type: choice
         options: [staging, production]
         default: staging
+      runtime_image:
+        description: aion-runtime image to deploy (default = latest published)
+        default: ghcr.io/ceoloo/aion-runtime:latest
 
 permissions:
   contents: read
@@ -31,6 +35,7 @@ concurrency:
 env:
   REGION: us-central1
   TF_VERSION: 1.9.8
+  RUNTIME_IMAGE: ${{ github.event.inputs.runtime_image || 'ghcr.io/ceoloo/aion-runtime:latest' }}
 
 jobs:
   # ── Staging: automatic after merge to main ────────────────────────────────
@@ -59,7 +64,7 @@ jobs:
           state_bucket: ${{ vars.GCP_TFSTATE_BUCKET_STAGING }}
           app_password: ${{ secrets.STAGING_APP_DB_PASSWORD }}
           migrator_password: ${{ secrets.STAGING_MIGRATOR_DB_PASSWORD }}
-          git_sha: ${{ github.sha }}
+          image: ${{ env.RUNTIME_IMAGE }}
 
   # ── Production: manual, human-gated, main only ─────────────────────────────
   production:
@@ -95,4 +100,4 @@ jobs:
           state_bucket: ${{ vars.GCP_TFSTATE_BUCKET_PRODUCTION }}
           app_password: ${{ secrets.PRODUCTION_APP_DB_PASSWORD }}
           migrator_password: ${{ secrets.PRODUCTION_MIGRATOR_DB_PASSWORD }}
-          git_sha: ${{ github.sha }}
+          image: ${{ env.RUNTIME_IMAGE }}

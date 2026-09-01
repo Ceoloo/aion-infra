@@ -91,18 +91,21 @@ aion-infra/
 │   ├── vps/     compose · Caddyfile · scripts (deploy/backup/restore/bootstrap) · system
 │   ├── aws/     README · architecture.md · terraform (minimal, validates)
 │   └── gcp/     README · terraform (modules + environments) · scripts (gcloud)
-├── runtime/     provider-neutral reference host (deployability fixture)
-│   └── sql/grants.sql   canonical least-privilege grants (in the image)
-├── scripts/     verify · portability-check · health-check · smoke-test  (neutral)
+├── scripts/     verify · portability-check · health-check · smoke-test · backup-restore-selftest
 ├── docs/        architecture · environments · security · networking · database ·
 │                deployment · observability · backup-recovery · runbook ·
-│                portability · phase-3
+│                portability · phase-3 · adr/
 └── .github/     workflows (validate · deploy-gcp · deploy-vps) + gcp-deploy action
 ```
 
+> The **runtime host** (the composition root that boots Core+Data and builds the
+> one image) lives in the sibling repo **[aion-runtime](https://github.com/Ceoloo/aion-runtime)**
+> ([ADR-002](https://github.com/Ceoloo/aion-docs/blob/main/adr/ADR-002-runtime-host-ownership.md)).
+> aion-infra **consumes** its image (`ghcr.io/ceoloo/aion-runtime`) — it builds none.
+
 ## Workflows
 
-- **Local**: run the reference runtime against a local Postgres — [runtime/README.md](runtime/README.md).
+- **Runtime image**: built + published by [aion-runtime](https://github.com/Ceoloo/aion-runtime)'s CI; every profile below deploys that image.
 - **VPS**: `providers/vps/scripts/deploy.sh` (pull → migrate fail-closed → roll →
   readiness → smoke); CI over SSH via [deploy-vps.yml](.github/workflows/deploy-vps.yml).
 - **GCP**: merge to `main` → [deploy-gcp.yml](.github/workflows/deploy-gcp.yml)
@@ -112,15 +115,22 @@ aion-infra/
 
 ## Verification
 
-- **Phase 3 checks:** `scripts/verify.sh` → **15/15 pass**.
-- **Portability checks:** `scripts/portability-check.sh` → **12/12 pass**.
-- **Live (local Postgres):** migrations, app-role connect, health, boot smoke,
-  DB-failure readiness recovery, migration-failure fail-closed, role separation.
+- **Infra Phase 3 checks:** `scripts/verify.sh` → **14/14 pass** (IaC across all
+  profiles, DB provisioning + roles, migration/health path, backups, human gate,
+  image consumption, no committed secrets).
+- **Infra portability checks:** `scripts/portability-check.sh` → **10/10 pass**
+  (fixture removed, infra builds no image, all profiles consume the aion-runtime
+  image + same migrate entrypoint, provider tech confined).
+- **Runtime host:** the runtime-source + acceptance checks run in
+  [aion-runtime](https://github.com/Ceoloo/aion-runtime)'s CI (portability 9/9;
+  migrate → deploy → readiness → smoke against an ephemeral Postgres).
 
 ## Status
 
-Phase 3 infrastructure is **defined declaratively for three profiles and verified
-by static validation + local acceptance runs**. GCP is fully specified; VPS is a
-working low-cost reference; AWS is a validated minimal mapping. **Live cloud
-provisioning of any profile requires that provider's credentials and is a
+Phase 3 + 3.5 are structurally complete: the runtime host is extracted to
+[aion-runtime](https://github.com/Ceoloo/aion-runtime) and every profile consumes
+its image. Phase 3 infrastructure is **defined declaratively for three profiles
+and verified by static validation + acceptance runs**. GCP is fully specified;
+VPS is a working low-cost reference; AWS is a validated minimal mapping. **Live
+cloud provisioning of any profile requires that provider's credentials and is a
 remaining operational step** — see [docs/phase-3.md](docs/phase-3.md).

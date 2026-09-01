@@ -27,7 +27,7 @@ not inside the application.
 - **`aion-core`** — imports no provider package.
 - **`aion-data`** — imports no provider package; owns the schema and the
   migration runner used everywhere.
-- **The runtime image** — one `runtime/Dockerfile`; env-var config; stdout JSON
+- **The runtime image** — one image built by [aion-runtime](https://github.com/Ceoloo/aion-runtime) (ADR-002); env-var config; stdout JSON
   logs; `/health/live` + `/health/ready`; graceful shutdown; no cloud SDK.
 - **The database contract** — PostgreSQL 16, reached by URL, two roles, same
   aion-data migrations.
@@ -48,7 +48,7 @@ to [`providers/`](../providers/).
 | Capability | VPS | AWS | GCP |
 |---|---|---|---|
 | Runtime hosting | Docker Compose (Node container) | ECS Fargate (or App Runner) | Cloud Run |
-| Container image | local build / registry | ECR | Artifact Registry |
+| Container image | aion-runtime image (GHCR) | same image (ECR mirror optional) | same image (AR mirror optional) |
 | PostgreSQL 16 | local container **or** managed URL | RDS | Cloud SQL |
 | Secrets | root-owned `0600` env file | Secrets Manager | Secret Manager |
 | Secret → app | env injection | env injection | env injection |

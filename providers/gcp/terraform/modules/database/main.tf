@@ -14,8 +14,7 @@
 #
 # The database OWNER/superuser is never handed to the runtime. Login roles are
 # created here; fine-grained GRANT/REVOKE (append-only events/telemetry, no DDL
-# for the app role) is applied through the migration path from the canonical
-# runtime/sql/grants.sql (shipped in the image, applied by the migrate job) —
+# for the app role) is applied through the migration path from grants.sql shipped in the aion-runtime image (applied by the migrate job) —
 # see docs/database.md. aion-data migrations remain authoritative for schema.
 
 resource "google_sql_database_instance" "postgres" {
@@ -107,7 +106,7 @@ resource "google_sql_database" "aion" {
 # secrets created by the secrets module. Rotation replaces both together.
 
 # Runtime application role — DML only. GRANT/REVOKE narrowing is applied by
-# sql/grants.sql through the migration identity (docs/database.md).
+# grants.sql (from the aion-runtime image) through the migration identity (docs/database.md).
 resource "google_sql_user" "app" {
   project         = var.project_id
   instance        = google_sql_database_instance.postgres.name

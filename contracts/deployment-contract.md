@@ -27,7 +27,7 @@ there is one portable workload and several native infrastructures.
 
 | Requirement | Contract |
 |---|---|
-| Execution | A Linux-compatible Node.js process, shipped as one immutable OCI container image (`runtime/Dockerfile`). |
+| Execution | A Linux-compatible Node.js process, shipped as one immutable OCI container image built by the [aion-runtime](https://github.com/Ceoloo/aion-runtime) repo (ADR-002). aion-infra consumes this image; it builds none. |
 | Configuration | **Environment variables only.** No provider SDK, no config baked into the image. |
 | Ingress | HTTPS — terminated by the platform (managed) or a reverse proxy (VPS). The app serves plain HTTP on `$PORT`. |
 | Liveness | `GET /health/live` → `200` while the process is healthy; performs no dependency work. |

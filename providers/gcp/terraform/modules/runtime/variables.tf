@@ -26,7 +26,7 @@ variable "subnet_id" {
 variable "image" {
   type        = string
   description = "Immutable container image (…/aion-runtime:<git-sha>). Placeholder is replaced by the deploy pipeline."
-  default     = "us-docker.pkg.dev/cloudrun/container/hello" # inert placeholder for `plan` before first build
+  default     = "ghcr.io/ceoloo/aion-runtime:latest"
 }
 
 # ── Identities ──────────────────────────────────────────────────────────────

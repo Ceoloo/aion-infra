@@ -1,9 +1,10 @@
-name: deploy-env
+name: gcp-deploy
 description: >-
-  Build the immutable runtime image, apply infra, run the migration job
-  (migration-before-deploy, halts on failure), roll the Cloud Run service to the
-  new image, then smoke-test. Shared by staging and production so the two
-  environments deploy the SAME way (aion-infra §44).
+  Deploy the aion-runtime image (built and published by the aion-runtime repo)
+  to Cloud Run: apply infra, run the migration job (migration-before-deploy,
+  halts on failure), roll the service, then smoke-test. aion-infra does NOT build
+  the runtime image — it consumes it (ADR-002). Shared by staging and production
+  so the two environments deploy the SAME way (aion-infra §44).
 
 inputs:
   environment:
@@ -18,7 +19,8 @@ inputs:
     required: true
   migrator_password:
     required: true
-  git_sha:
+  image:
+    description: The aion-runtime image to deploy (e.g. ghcr.io/ceoloo/aion-runtime:<sha>).
     required: true
 
 runs:
@@ -28,8 +30,12 @@ runs:
       shell: bash
       run: |
         echo "PREFIX=aion-${{ inputs.environment }}" >> "$GITHUB_ENV"
-        echo "IMAGE=${{ inputs.region }}-docker.pkg.dev/${{ inputs.project_id }}/aion-${{ inputs.environment }}-images/aion-runtime:${{ inputs.git_sha }}" >> "$GITHUB_ENV"
+        echo "IMAGE=${{ inputs.image }}" >> "$GITHUB_ENV"
+        # Release SHA = the image tag (the aion-runtime commit baked into it).
+        echo "RELEASE_SHA=${IMAGE##*:}" >> "$GITHUB_ENV"
         echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+      env:
+        IMAGE: ${{ inputs.image }}
 
     # 1) Infra is declarative and applied first (idempotent). Image changes are
     #    ignored by Terraform, so this does not fight the rollout below.
@@ -41,27 +47,16 @@ runs:
         TF_VAR_region: ${{ inputs.region }}
         TF_VAR_app_password: ${{ inputs.app_password }}
         TF_VAR_migrator_password: ${{ inputs.migrator_password }}
-        TF_VAR_git_sha: ${{ inputs.git_sha }}
+        TF_VAR_image: ${{ inputs.image }}
+        TF_VAR_git_sha: ${{ env.RELEASE_SHA }}
         TF_VAR_build_time: ${{ env.BUILD_TIME }}
       run: |
         terraform init -backend-config="bucket=${{ inputs.state_bucket }}"
         terraform apply -input=false -auto-approve
 
-    # 2) Build the immutable, SHA-tagged image and push to Artifact Registry.
-    - name: build + push image
-      shell: bash
-      working-directory: runtime
-      run: |
-        gcloud auth configure-docker ${{ inputs.region }}-docker.pkg.dev --quiet
-        docker build \
-          --build-arg AION_CORE_REF="${AION_CORE_REF:-}" \
-          --build-arg AION_DATA_REF="${AION_DATA_REF:-}" \
-          -t "${IMAGE}" .
-        docker push "${IMAGE}"
-
-    # 3) Migration-BEFORE-deploy. Point the job at the new image, execute, WAIT.
-    #    A failed migration returns non-zero here and stops the deploy — the
-    #    currently-serving revision is left intact (§46, §63).
+    # 2) Migration-BEFORE-deploy. Point the job at the aion-runtime image,
+    #    execute, WAIT. A failed migration returns non-zero here and stops the
+    #    deploy — the currently-serving revision is left intact (§46, §63).
     - name: run migrations (job)
       shell: bash
       run: |
@@ -71,7 +66,7 @@ runs:
         gcloud run jobs execute "${PREFIX}-migrate" \
           --project "${{ inputs.project_id }}" --region "${{ inputs.region }}" --wait
 
-    # 4) Roll the service to the new image (managed TLS, health-gated by probes).
+    # 3) Roll the service to the aion-runtime image (managed TLS, probe-gated).
     - name: deploy runtime
       shell: bash
       run: |
@@ -79,7 +74,7 @@ runs:
           --project "${{ inputs.project_id }}" --region "${{ inputs.region }}" \
           --image "${IMAGE}"
 
-    # 5) Non-destructive smoke test against the deployed revision.
+    # 4) Non-destructive smoke test against the deployed revision.
     - name: smoke test
       shell: bash
       run: |
@@ -87,5 +82,5 @@ runs:
           --project '${{ inputs.project_id }}' --region '${{ inputs.region }}' \
           --format 'value(status.url)')"
         TOKEN="$(gcloud auth print-identity-token)"
-        URL="${URL}" TOKEN="${TOKEN}" EXPECTED_SHA="${{ inputs.git_sha }}" \
+        URL="${URL}" TOKEN="${TOKEN}" EXPECTED_SHA="${RELEASE_SHA}" \
           scripts/smoke-test.sh

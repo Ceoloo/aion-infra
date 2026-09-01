@@ -167,7 +167,11 @@ resource "aws_db_instance" "postgres" {
   tags = local.tags
 }
 
-# ── Image registry ──────────────────────────────────────────────────────────
+# ── Image registry (OPTIONAL private mirror) ────────────────────────────────
+# The deployed runtime image comes from the aion-runtime repo's GHCR image by
+# default (var.image → ghcr.io/ceoloo/aion-runtime:<tag>; ECS can pull public
+# GHCR — ADR-002). This ECR repo exists only if an org prefers a private mirror;
+# nothing here builds an image.
 resource "aws_ecr_repository" "runtime" {
   name                 = "${var.name_prefix}-runtime"
   image_tag_mutability = "IMMUTABLE"

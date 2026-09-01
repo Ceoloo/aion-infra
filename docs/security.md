@@ -20,7 +20,7 @@ credentials, or arbitrary cloud control (aion-infra §16, §49).
 ## Database roles (the Phase 2 two-role model)
 
 Provisioned by the `database` module; privileges shaped by
-[`runtime/sql/grants.sql`](../runtime/sql/grants.sql):
+`grants.sql` (shipped in the [aion-runtime](https://github.com/Ceoloo/aion-runtime) image):
 
 | Role | Privilege | Used via |
 |---|---|---|

@@ -6,8 +6,8 @@
 # for Mode A (local DB). It creates the SAME two roles every provider uses —
 # aion_app (DML) and aion_migrator (DDL) — so the two-role model holds on a VPS
 # exactly as on Cloud SQL / RDS. Table-level privileges (append-only logs, no
-# DDL for app) are applied later by the migrate step from the canonical
-# runtime/sql/grants.sql (shipped in the runtime image), NOT here.
+# DDL for app) are applied later by the migrate step from grants.sql shipped in
+# the aion-runtime image (ADR-002), NOT here.
 #
 # Passwords come from the environment (AION_APP_PASSWORD / AION_MIGRATOR_PASSWORD),
 # injected from the root-owned 0600 .env — never hardcoded.

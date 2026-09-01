@@ -26,7 +26,7 @@ protection on, 30 retained backups).
 ## Roles (two-role least privilege)
 
 Created by Terraform (`google_sql_user`); privileges shaped by
-[`runtime/sql/grants.sql`](../runtime/sql/grants.sql):
+`grants.sql` (shipped in the [aion-runtime](https://github.com/Ceoloo/aion-runtime) image):
 
 - **`aion_app`** — runtime DML. `SELECT/INSERT/UPDATE` on canonical tables,
   `UPDATE` only where operational state is mutable (`runs`, `missions`,
@@ -47,7 +47,7 @@ invented here**. Flow, enforced by the pipeline:
 validate release
    ↓
 migration JOB (migrator identity)
-   ↓  1. apply pending aion-data migrations   (runtime/src/migrate.ts → dl.migrate())
+   ↓  1. apply pending aion-data migrations   (aion-runtime migrate entrypoint → dl.migrate())
    ↓  2. apply aion-infra grants.sql          (least-privilege privileges)
    ↓  (any failure → non-zero exit → deploy HALTS; existing runtime intact)
 deploy runtime (new image)

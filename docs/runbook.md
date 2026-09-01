@@ -98,7 +98,7 @@ validate, then cut over deliberately. See [backup-recovery.md](backup-recovery.m
      --project ${PROJECT_ID} --limit 50
    ```
 3. Fix the migration in **aion-data** (schema is authoritative there), or the
-   grants in `runtime/sql/grants.sql`. Do not hand-edit the production schema.
+   grants in the aion-runtime image's `grants.sql`. Do not hand-edit the production schema.
 4. Re-run the deploy; migrations are idempotent (already-applied files are
    skipped; a changed applied file is a drift error, not a silent re-apply).
 

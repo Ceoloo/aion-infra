@@ -68,7 +68,7 @@ variable "migrator_password" {
 variable "image" {
   type        = string
   description = "Runtime image (…/aion-runtime:<sha>). Placeholder for plan."
-  default     = "public.ecr.aws/docker/library/busybox:latest"
+  default     = "ghcr.io/ceoloo/aion-runtime:latest"
 }
 
 variable "desired_count" {

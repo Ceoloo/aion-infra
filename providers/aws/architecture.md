@@ -24,10 +24,11 @@ private and reachable only from the task security group.
 
 ## Same-artifact / same-migrations proof
 
-- The ECS task definition runs `var.image` — the **same** `runtime/Dockerfile`
-  image built for VPS and GCP. No AWS-specific Dockerfile.
+- The ECS task definition runs `var.image` — the **same** aion-runtime image
+  (`ghcr.io/ceoloo/aion-runtime`) that VPS and GCP deploy. No AWS-specific image;
+  aion-infra builds none (ADR-002).
 - The **migrate** task overrides the command to `node dist/migrate.js`, which
-  runs **aion-data's** migration runner + `runtime/sql/grants.sql` — the same
+  runs **aion-data's** migration runner + the aion-runtime image's `grants.sql` — the same
   migrations as every provider.
 - The runtime reads `DATABASE_URL` from Secrets Manager as an env value; it
   imports no AWS SDK. Portability is preserved at the contract boundary.
@@ -51,7 +52,7 @@ The minimal Terraform here is `validate`-clean. To go live:
    production GitHub Environment human gate.
 5. **DB roles** — RDS master is `aion_migrator` (the DDL role); the migrate
    step creates/【grants】 the least-privileged `aion_app` role via
-   `runtime/sql/grants.sql` (extend it to `CREATE ROLE aion_app` on first run,
+   the aion-runtime image's `grants.sql` (extend it to `CREATE ROLE aion_app` on first run,
    as the VPS `init-roles.sh` does, or run a one-time bootstrap SQL).
 6. **Backups/restore** — RDS automated backups + PITR are enabled by
    `backup_retention_days`; document a snapshot-restore-into-isolated-instance
