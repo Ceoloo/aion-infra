@@ -1,52 +1,31 @@
 # ============================================================================
 # AION — generic Linux VPS deployment profile (Hostinger / DO / Hetzner / EC2).
 # ============================================================================
-# One server is enough (aion-infra amendment §9): a reverse proxy, the AION
-# runtime (the SAME image every provider uses), and an OPTIONAL local Postgres.
-# No Kubernetes/Swarm/Consul/Nomad/RabbitMQ/Redis.
+# OPS-001 production edge: Traefik (already on the VPS) terminates TLS and
+# routes to the Runtime. Do NOT run Caddy alongside Traefik.
 #
-#   Internet → Caddy (HTTPS, auto certs) → aion-runtime → PostgreSQL
+#   DNS → runtime.<domain>
+#     → Traefik :443  (host / existing edge — external Docker network)
+#     → aion-runtime :8080  (this compose; NOT published on the host)
+#     → PostgreSQL (Mode A local or Mode B managed — never public)
 #
 # Database modes (see providers/vps/README.md):
-#   Mode A (local DB):   `docker compose --profile local-db up -d`
-#                         DATABASE_URL/MIGRATION_DATABASE_URL point at `postgres`.
-#   Mode B (managed DB): `docker compose up -d`  (no postgres service)
-#                         DATABASE_URL/MIGRATION_DATABASE_URL point at a managed
-#                         PostgreSQL — application unchanged.
+#   Mode A (local DB):   `AION_LOCAL_DB=1 ./scripts/deploy.sh`
+#   Mode B (managed DB): `./scripts/deploy.sh`
 #
-# Secrets come from a root-owned 0600 env file (providers/vps/.env), never the
-# repo. Only the runtime's HTTP port is exposed — via Caddy. Postgres binds to
-# localhost only and is never published to the internet.
+# Secrets: root-owned 0600 `/opt/aion/.env` (never commit). The long-running
+# runtime receives an explicit env allowlist that EXCLUDES MIGRATION_DATABASE_URL.
+#
+# Legacy Caddy (greenfield VPS with no Traefik): compose profile `caddy` —
+# see legacy/Caddyfile. Prefer Traefik when the host already has it.
 
 name: aion
 
 services:
-  # ── Reverse proxy: HTTPS termination + automatic certificates ─────────────
-  caddy:
-    image: caddy:2.8-alpine
-    restart: unless-stopped
-    depends_on:
-      aion-runtime:
-        condition: service_healthy
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data          # persisted certs
-      - caddy_config:/config
-    environment:
-      AION_DOMAIN: ${AION_DOMAIN:?set AION_DOMAIN in .env}
-    networks: [edge, internal]
-
-  # ── The AION runtime — the SAME immutable image used on AWS/GCP ───────────
+  # ── The AION runtime — SAME immutable image used on AWS/GCP ───────────────
   aion-runtime:
     image: ${AION_IMAGE:?set AION_IMAGE (…/aion-runtime:<git-sha>)}
     restart: unless-stopped
-    # EXPLICIT allowlist (NOT env_file): the runtime receives ONLY the app-role
-    # contract vars. MIGRATION_DATABASE_URL is deliberately absent so the
-    # long-running runtime can never hold the DDL credential (contract §4;
-    # aion-infra §16–17). Values are interpolated from providers/vps/.env.
     environment:
       PORT: "8080"
       AION_ENVIRONMENT: ${AION_ENVIRONMENT}
@@ -55,16 +34,31 @@ services:
       GIT_SHA: ${GIT_SHA:-unknown}
       DATABASE_SSL: ${DATABASE_SSL:-true}
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      # Comma-separated Console origins (Vercel). Empty = no CORS headers.
+      AION_CORS_ORIGINS: ${AION_CORS_ORIGINS:-}
+    # Internal only — never publish 8080 on the host. Traefik reaches us via
+    # the external edge network + Docker labels.
     expose:
-      - "8080"                    # internal only; never published to the host
+      - "8080"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 3s
       start_period: 10s
       retries: 3
-    stop_grace_period: 30s        # allow graceful SIGTERM shutdown
-    networks: [internal]
+    stop_grace_period: 30s
+    networks:
+      - internal
+      - traefik
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${AION_TRAEFIK_NETWORK:-traefik}
+      - traefik.http.routers.aion-runtime.rule=Host(`${AION_DOMAIN:?set AION_DOMAIN}`)
+      - traefik.http.routers.aion-runtime.entrypoints=${AION_TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.aion-runtime.tls=true
+      - traefik.http.routers.aion-runtime.tls.certresolver=${AION_TRAEFIK_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.services.aion-runtime.loadbalancer.server.port=8080
+      - traefik.http.routers.aion-runtime.service=aion-runtime
 
   # ── OPTIONAL local PostgreSQL (Mode A). Enable with --profile local-db ────
   postgres:
@@ -75,14 +69,11 @@ services:
       POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set in .env for local-db}
       POSTGRES_DB: ${POSTGRES_DB:-aion_data}
-      # Consumed by system/init-roles.sh at first boot to create the two
-      # least-privileged roles (the migrate step later applies grants.sql).
       AION_APP_PASSWORD: ${AION_APP_PASSWORD:?set in .env for local-db}
       AION_MIGRATOR_PASSWORD: ${AION_MIGRATOR_PASSWORD:?set in .env for local-db}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./system/init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro
-    # Bind to loopback ONLY — never exposed to the internet (§11, §15).
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -92,10 +83,35 @@ services:
       retries: 10
     networks: [internal]
 
+  # ── Legacy Caddy (only when the host has NO Traefik). Profile: caddy ──────
+  # Do not enable this profile next to an existing Traefik on :80/:443.
+  caddy:
+    profiles: ["caddy"]
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      aion-runtime:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./legacy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      AION_DOMAIN: ${AION_DOMAIN:?set AION_DOMAIN in .env}
+    networks: [edge, internal]
+
 networks:
+  # Existing host Traefik Docker network (name varies — set AION_TRAEFIK_NETWORK).
+  traefik:
+    external: true
+    name: ${AION_TRAEFIK_NETWORK:-traefik}
   edge:
+    # Used only by the optional Caddy profile.
   internal:
-    internal: false
+    name: aion_internal
 
 volumes:
   caddy_data:

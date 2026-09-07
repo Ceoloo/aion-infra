@@ -25,7 +25,7 @@ rewriting Core, Data, or product code.
         Provider-neutral deployment contract
           │                │              │
      VPS profile      AWS profile     GCP profile
-   Compose + Caddy   ECS/RDS/…       Cloud Run/SQL
+   Compose+Traefik   ECS/RDS/…       Cloud Run/SQL
    (ACTIVE, cheap)   (SUPPORTED)     (SUPPORTED managed)
 ```
 
@@ -47,7 +47,7 @@ Full contract: [contracts/deployment-contract.md](contracts/deployment-contract.
 
 | Profile | Runtime | Database | Status |
 |---|---|---|---|
-| **[VPS](providers/vps/README.md)** | Docker Compose + Caddy (auto-TLS) | local Postgres (Mode A) **or** managed URL (Mode B) | **ACTIVE / low-cost** |
+| **[VPS](providers/vps/README.md)** | Docker Compose + Traefik host edge (Caddy legacy profile) | local Postgres (Mode A) **or** managed URL (Mode B) | **ACTIVE / low-cost** |
 | **[AWS](providers/aws/README.md)** | ECS Fargate | RDS PostgreSQL 16 | **SUPPORTED architecture** (minimal TF, not provisioned) |
 | **[GCP](providers/gcp/README.md)** | Cloud Run | Cloud SQL PostgreSQL 16 | **SUPPORTED managed** (full TF, not provisioned) |
 
@@ -88,7 +88,7 @@ aion-infra/
 ├── contracts/
 │   └── deployment-contract.md      the provider-neutral workload contract
 ├── providers/
-│   ├── vps/     compose · Caddyfile · scripts (deploy/backup/restore/bootstrap) · system
+│   ├── vps/     compose · Traefik labels · scripts (deploy/backup/restore/bootstrap) · system
 │   ├── aws/     README · architecture.md · terraform (minimal, validates)
 │   └── gcp/     README · terraform (modules + environments) · scripts (gcloud)
 ├── scripts/     verify · portability-check · health-check · smoke-test · backup-restore-selftest
