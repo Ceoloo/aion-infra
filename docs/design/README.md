@@ -14,6 +14,7 @@ mission requires them, and only via the provider profiles under
 |---|---|---|---|
 | [agent-trace-pipeline.md](agent-trace-pipeline.md) | [agent-trace-schema](https://github.com/Ceoloo/aion-docs/blob/main/engineering/agent-trace-schema.md) | P0 | Design |
 | [programmatic-execution-sandbox.md](programmatic-execution-sandbox.md) | [core programmatic-execution spec](https://github.com/Ceoloo/aion-core/blob/main/docs/design/programmatic-execution-and-a2a.md) | P1 | Design |
+| [external-credentials.md](external-credentials.md) | OpenRouter + GoHighLevel credential/env contract (secret store, rotation) | per-mission | Design |
 
 ## Ground rules
 
