@@ -89,7 +89,8 @@ AION_LOCAL_DB=1 ./scripts/deploy.sh
 - separate `DATABASE_URL` (app) vs `MIGRATION_DATABASE_URL` (migrate one-shot only);
 - immutable, **digest-pinned** `AION_IMAGE=ghcr.io/ceoloo/aion-runtime@sha256:<digest>`
   (deploy-vps.yml resolves the release tag to a digest and writes it);
-- `AION_CORS_ORIGINS` = approved Vercel Console origins (comma-separated).
+- `AION_CORS_ORIGINS` = approved Vercel Console origins (comma-separated);
+  enforced by the Traefik `aion-cors` middleware, not the Runtime.
 
 ## Deploy (OPS-001 checklist)
 
@@ -112,8 +113,11 @@ AION_LOCAL_DB=1 ./scripts/deploy.sh
    - one tenant-scoped `/v1/...` path (expects `x-aion-tenant-id`)
 7. Configure GitHub Environment secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 8. **Only then** create the Vercel `aion-operator-console` project with
-   `VITE_AION_RUNTIME_URL=https://runtime.aionsystems.ai` and set
-   `AION_CORS_ORIGINS` on Runtime to that Vercel origin.
+   `VITE_AION_RUNTIME_URL=https://runtime.aionsystems.ai`, set `AION_CORS_ORIGINS`
+   to that Vercel origin, and recreate the Runtime container so Traefik picks up
+   the `aion-cors` middleware. Preflight check:
+   `curl -i -X OPTIONS https://runtime…/v1/services -H 'Origin: <vercel origin>' -H 'Access-Control-Request-Method: GET'`
+   → `204` + `Access-Control-Allow-Origin: <vercel origin>`.
 
 CI drives deploys over SSH — see
 [`.github/workflows/deploy-vps.yml`](../../.github/workflows/deploy-vps.yml).

@@ -59,6 +59,16 @@ services:
       - traefik.http.routers.aion-runtime.tls.certresolver=${AION_TRAEFIK_CERT_RESOLVER:-letsencrypt}
       - traefik.http.services.aion-runtime.loadbalancer.server.port=8080
       - traefik.http.routers.aion-runtime.service=aion-runtime
+      # ── Browser CORS for the Operator Console — enforced at the EDGE ─────────
+      # The Runtime image is origin-agnostic; Traefik answers preflight and adds
+      # Access-Control-* for exactly the origins in AION_CORS_ORIGINS (empty ⇒ no
+      # CORS headers ⇒ same-origin/edge only). No credentials (token/header auth).
+      - traefik.http.middlewares.aion-cors.headers.accessControlAllowOriginList=${AION_CORS_ORIGINS:-}
+      - traefik.http.middlewares.aion-cors.headers.accessControlAllowMethods=GET,POST,OPTIONS
+      - traefik.http.middlewares.aion-cors.headers.accessControlAllowHeaders=content-type,authorization,x-aion-tenant-id,x-aion-operator-id
+      - traefik.http.middlewares.aion-cors.headers.accessControlMaxAge=86400
+      - traefik.http.middlewares.aion-cors.headers.addVaryHeader=true
+      - traefik.http.routers.aion-runtime.middlewares=aion-cors@docker
 
   # ── OPTIONAL local PostgreSQL (Mode A). Enable with --profile local-db ────
   postgres:
