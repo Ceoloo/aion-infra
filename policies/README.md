@@ -15,7 +15,7 @@ accepted limitations, recorded rather than hidden.
 | Runtime typecheck/build | `tsc` | **blocking** | The deployability fixture compiles against the real workload. |
 | Terraform plan (staging) | `terraform plan` | visibility | PRs show intended change; runs only when cloud auth is configured (§23). |
 
-## Deploy-time guardrails (in `deploy.yml`)
+## Deploy-time guardrails (in `deploy-gcp.yml` / the `gcp-deploy` action, and `deploy-vps.yml`)
 
 - **Production human gate** — the `production` GitHub Environment requires
   reviewer approval before the deploy job runs (§25, §64). Configure it under

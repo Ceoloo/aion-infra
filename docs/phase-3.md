@@ -318,8 +318,10 @@ health/readiness exist, and the release SHA is identifiable.
 **READY WITH CONDITIONS.** The infrastructure is complete and coherent, now
 **provider-portable** (VPS active reference, AWS supported mapping, GCP managed
 profile — one workload, one image, one set of migrations), and proven by static
-validation (15/15 Phase 3 + 12/12 portability), a full local acceptance run
-(DB-failure and migration-failure scenarios), and a VPS-style acceptance run.
+validation (the current post-extraction harnesses are `verify.sh` 14/14 +
+`portability-check.sh` 10/10; the 15/15 + 12/12 figures were the pre-extraction
+counts when the runtime host still lived in this repo), a full local acceptance
+run (DB-failure and migration-failure scenarios), and a VPS-style acceptance run.
 
 The runtime-host-ownership ADR is now **resolved**
 ([ADR-0001](adr/ADR-0001-runtime-host-ownership.md): a dedicated `aion-runtime`
