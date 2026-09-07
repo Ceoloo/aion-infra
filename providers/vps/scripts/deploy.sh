@@ -12,9 +12,12 @@
 #   AION_EDGE=caddy ./scripts/deploy.sh
 #
 # Usage (on the VPS):  cd /opt/aion && ./deploy.sh
-#   Env: AION_COMPOSE_DIR (default .), AION_LOCAL_DB=1 to also start local Postgres.
+#   Env: AION_COMPOSE_DIR (default: the dir containing this script's parent, i.e.
+#        /opt/aion), AION_LOCAL_DB=1 to also start local Postgres.
 set -euo pipefail
-cd "${AION_COMPOSE_DIR:-.}"
+# Self-locate to the compose dir so the caller's CWD is irrelevant — CI runs this
+# via `sudo -n /opt/aion/scripts/deploy.sh` from the aion user's HOME.
+cd "${AION_COMPOSE_DIR:-"$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"}"
 
 [ -f .env ] || { echo "missing .env (root-owned 0600) — see .env.example" >&2; exit 1; }
 
