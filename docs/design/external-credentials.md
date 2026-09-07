@@ -3,7 +3,9 @@
 - **Drives:** integrating an external model router (OpenRouter) and an external
   CRM (GoHighLevel) as governed AION execution environments
 - **Priority:** per-mission (wire when a mission needs the model router or CRM)
-- **Status:** Design — not yet provisioned
+- **Status:** Credential slots + Revenue Copilot HTTP consumer profile landed.
+  Rotate keys into `/opt/aion/.env`; enable compose profile `revenue-copilot`
+  when `COPILOT_IMAGE` is set. GHL writes still wait on Execution Gateway.
 
 `aion-infra` owns **where secrets live and how they reach the workload**. This
 spec defines the credential contract for two external services. It contains **no
