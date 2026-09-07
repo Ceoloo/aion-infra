@@ -2,9 +2,17 @@ name: deploy-vps
 
 # VPS deployment path (aion-infra amendment §13). The runtime IMAGE is built and
 # published by the aion-runtime repo (ADR-002); aion-infra CONSUMES it — it does
-# not build it. Deployments resolve and persist an IMMUTABLE runtime commit SHA
-# (never a bare :latest). Production preserves the human gate via a GitHub
-# Environment required-reviewers rule. Dispatch-only, so no auto-noise to gate.
+# not build it.
+#
+# Deployment IDENTITY is an IMMUTABLE DIGEST, never a tag:
+#   resolve release tag → dereference annotated Git tag → commit SHA
+#   → GET the GHCR manifest → capture Docker-Content-Digest
+#   → deploy ghcr.io/ceoloo/aion-runtime@sha256:<digest>
+# The tag string is recorded for humans only and is never a pull reference, so
+# there is no verify→deploy TOCTOU window and no `:latest` production path.
+#
+# Production preserves the human gate via a GitHub Environment required-reviewers
+# rule. Dispatch-only, so no auto-noise to gate.
 on:
   workflow_dispatch:
     inputs:
@@ -15,8 +23,16 @@ on:
         default: staging
       runtime_image:
         description: >-
-          Pin a specific aion-runtime image ref
-          (blank = newest execution-platform-vX.Y.Z release tag).
+          Optional pin. Accepts ghcr.io/ceoloo/aion-runtime@sha256:<digest>,
+          ghcr.io/ceoloo/aion-runtime:<tag|sha>, or a bare <tag|sha>. Any tag
+          form is canonicalised to @sha256:<digest> before deploy. Blank =
+          newest execution-platform-vX.Y.Z release tag.
+        default: ''
+      git_sha:
+        description: >-
+          40-hex aion-runtime commit SHA. REQUIRED when runtime_image is pinned
+          to something other than a recognised execution-platform-vX.Y.Z tag
+          (we will not guess, and never record a Docker tag as GIT_SHA).
         default: ''
 
 permissions:
@@ -39,74 +55,155 @@ jobs:
           if [ "${{ github.event.inputs.environment }}" = "production" ] && [ "${GITHUB_REF}" != "refs/heads/main" ]; then
             echo "production VPS deploy only from main" >&2; exit 1
           fi
-      - name: resolve immutable runtime image
+
+      - name: resolve digest-pinned runtime image
         id: pick
         env:
           GH_TOKEN: ${{ github.token }}
           PINNED: ${{ github.event.inputs.runtime_image }}
+          GIT_SHA_INPUT: ${{ github.event.inputs.git_sha }}
         run: |
           set -euo pipefail
           REPO=ghcr.io/ceoloo/aion-runtime
+          RELEASE_RE='^execution-platform-v[0-9]+\.[0-9]+\.[0-9]+$'
 
-          GIT_SHA=""
-          if [ -n "${PINNED}" ]; then
-            IMAGE="${PINNED}"
-            echo "resolved from dispatch pin: ${IMAGE}"
-          else
-            # aion-infra CONSUMES a boot-certified immutable release image
-            # (ADR-002 + aion-runtime CI Gate A). It never deploys `main` HEAD:
-            # the release line (execution-platform-vX.Y.Z) is authoritative and
-            # can be AHEAD of aion-runtime's main.
-            TAG="$(gh api repos/ceoloo/aion-runtime/tags --paginate --jq '.[].name' \
-                   | grep -E '^execution-platform-v[0-9]+\.[0-9]+\.[0-9]+$' \
-                   | sort -V | tail -n1)"
-            [ -n "${TAG}" ] || { echo "no execution-platform-vX.Y.Z tag found" >&2; exit 1; }
-            IMAGE="${REPO}:${TAG}"
-            GIT_SHA="$(gh api repos/ceoloo/aion-runtime/git/refs/tags/${TAG} --jq '.object.sha')"
-            # annotated tag → dereference to the commit
-            TYPE="$(gh api repos/ceoloo/aion-runtime/git/tags/${GIT_SHA} --jq '.object.sha' 2>/dev/null || true)"
-            [ -n "${TYPE}" ] && GIT_SHA="${TYPE}"
-            echo "resolved newest release tag: ${TAG} -> ${IMAGE} (commit ${GIT_SHA})"
-          fi
+          die() { echo "::error::$*"; exit 1; }
 
-          # Preflight: the image MUST already exist in GHCR (Gate A publishes it
-          # on the tag push). Fail here, before we SSH to the box.
-          REF="${IMAGE##*:}"
+          # Anonymous GHCR pull token (the package is public).
           TOKEN="$(curl -fsSL "https://ghcr.io/token?scope=repository:ceoloo/aion-runtime:pull" | jq -r .token)"
-          CODE="$(curl -fsS -o /dev/null -w '%{http_code}' \
-            -H "Authorization: Bearer ${TOKEN}" \
-            -H 'Accept: application/vnd.oci.image.index.v1+json' \
-            -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
-            -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
-            "https://ghcr.io/v2/ceoloo/aion-runtime/manifests/${REF}" || true)"
-          if [ "${CODE}" != "200" ]; then
-            echo "image not found in GHCR: ${IMAGE} (HTTP ${CODE})" >&2
-            echo "Gate A must have built+published this tag first." >&2
-            exit 1
+          [ -n "${TOKEN}" ] && [ "${TOKEN}" != "null" ] || die "could not obtain a GHCR pull token"
+
+          # GET the manifest for a ref (tag OR sha256:digest); echo the
+          # authoritative Docker-Content-Digest. Fails unless HTTP 200 and the
+          # digest matches sha256:<64 hex>.
+          resolve_digest() {
+            ref="$1"
+            # No -f: we want the real HTTP code (incl. 404) rather than a curl exit.
+            hdrs="$(curl -sS -D - -o /dev/null \
+              -H "Authorization: Bearer ${TOKEN}" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json' \
+              -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+              -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+              -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+              -w 'HTTPSTATUS:%{http_code}' \
+              "https://ghcr.io/v2/ceoloo/aion-runtime/manifests/${ref}")" || die "GHCR request errored for '${ref}'"
+            code="$(printf '%s' "${hdrs}" | sed -n 's/.*HTTPSTATUS://p' | tr -d '[:space:]')"
+            [ "${code}" = "200" ] || die "GHCR manifest for '${ref}' is HTTP ${code} (need 200)"
+            dg="$(printf '%s\n' "${hdrs}" | tr -d '\r' \
+                  | awk 'BEGIN{IGNORECASE=1} /^docker-content-digest:[[:space:]]*/{print $2}' | tail -n1)"
+            printf '%s\n' "${dg}" | grep -Eq '^sha256:[a-f0-9]{64}$' \
+              || die "no valid Docker-Content-Digest for '${ref}' (got: '${dg}')"
+            printf '%s\n' "${dg}"
+          }
+
+          # Dereference a Git ref (annotated OR lightweight tag) to its commit.
+          tag_commit() {
+            t="$1"
+            obj="$(gh api "repos/ceoloo/aion-runtime/git/ref/tags/${t}" --jq '.object.sha')"
+            typ="$(gh api "repos/ceoloo/aion-runtime/git/ref/tags/${t}" --jq '.object.type')"
+            if [ "${typ}" = "tag" ]; then
+              gh api "repos/ceoloo/aion-runtime/git/tags/${obj}" --jq '.object.sha'
+            else
+              printf '%s\n' "${obj}"
+            fi
+          }
+
+          RELEASE_TAG=""
+          GIT_SHA=""
+          MANIFEST_REF=""
+          PIN_DIGEST=""
+
+          if [ -z "${PINNED}" ]; then
+            # ── Release-tag path ──────────────────────────────────────────────
+            RELEASE_TAG="$(gh api repos/ceoloo/aion-runtime/tags --paginate --jq '.[].name' \
+                           | grep -E "${RELEASE_RE}" | sort -V | tail -n1)"
+            [ -n "${RELEASE_TAG}" ] || die "no execution-platform-vX.Y.Z tag found on aion-runtime"
+            GIT_SHA="$(tag_commit "${RELEASE_TAG}")"
+            MANIFEST_REF="${RELEASE_TAG}"
+            echo "release tag        : ${RELEASE_TAG}"
+          else
+            # ── Dispatch pin ─────────────────────────────────────────────────
+            case "${PINNED}" in
+              "${REPO}@sha256:"*) PIN_DIGEST="${PINNED##*@}"; MANIFEST_REF="${PIN_DIGEST}" ;;
+              "${REPO}:"*)        MANIFEST_REF="${PINNED##*:}" ;;
+              *@sha256:*|*/*:*|*/*@*) die "pin must reference ${REPO} (got '${PINNED}')" ;;
+              sha256:*)          PIN_DIGEST="${PINNED}"; MANIFEST_REF="${PIN_DIGEST}" ;;
+              *:*)               die "pin must be ${REPO}:<ref>, ${REPO}@sha256:<digest>, sha256:<digest>, or a bare <tag|sha>" ;;
+              *)                 MANIFEST_REF="${PINNED}" ;;
+            esac
+            echo "dispatch pin       : ${PINNED} (manifest ref: ${MANIFEST_REF})"
+            case "${MANIFEST_REF}" in
+              latest|*:latest) die "refusing a ':latest' pin — supply an execution-platform-vX.Y.Z tag or an @sha256:<digest>" ;;
+            esac
+
+            if [ -n "${GIT_SHA_INPUT}" ]; then
+              GIT_SHA="${GIT_SHA_INPUT}"
+              echo "git_sha (explicit) : ${GIT_SHA}"
+            elif printf '%s\n' "${MANIFEST_REF}" | grep -Eq "${RELEASE_RE}"; then
+              RELEASE_TAG="${MANIFEST_REF}"
+              GIT_SHA="$(tag_commit "${RELEASE_TAG}")"
+              echo "git_sha (from tag) : ${GIT_SHA}"
+            else
+              die "cannot derive a Git commit for pin '${PINNED}'. Supply the 'git_sha' input (40-hex) or pin a recognised execution-platform-vX.Y.Z tag."
+            fi
           fi
-          # Fall back to the image ref's own suffix when no commit was resolved
-          # (e.g. a dispatch pin that is itself a :<sha> tag).
-          [ -n "${GIT_SHA}" ] || GIT_SHA="${REF}"
-          echo "image present in GHCR: ${IMAGE} (git_sha=${GIT_SHA})"
+
+          # ── Authoritative digest is the deployment identity ────────────────
+          DIGEST="$(resolve_digest "${MANIFEST_REF}")"
+          if [ -n "${PIN_DIGEST}" ] && [ "${PIN_DIGEST}" != "${DIGEST}" ]; then
+            die "pinned digest ${PIN_DIGEST} != registry digest ${DIGEST}"
+          fi
+
+          DEPLOY_IMAGE="${REPO}@${DIGEST}"
+          DEPLOY_GIT_SHA="${GIT_SHA}"
+          DEPLOY_RELEASE_TAG="${RELEASE_TAG:-}"
+
+          # ── Validation gates (fail the workflow, not the box) ──────────────
+          printf '%s\n' "${DIGEST}"        | grep -Eq '^sha256:[a-f0-9]{64}$' || die "digest failed sha256:<64hex>: ${DIGEST}"
+          printf '%s\n' "${DEPLOY_GIT_SHA}" | grep -Eq '^[0-9a-f]{40}$'       || die "DEPLOY_GIT_SHA is not a 40-hex Git SHA: '${DEPLOY_GIT_SHA}'"
+          case "${DEPLOY_IMAGE}" in *"@sha256:"*) : ;; *) die "DEPLOY_IMAGE is not digest-pinned: ${DEPLOY_IMAGE}" ;; esac
+          case "${DEPLOY_IMAGE}" in *:latest|*:latest@*) die "refusing a :latest production reference" ;; esac
+          printf '%s\n' "${DEPLOY_GIT_SHA}" | grep -Eiq 'execution-platform' && die "GIT_SHA looks like a Docker tag" || true
+
           {
-            echo "image=${IMAGE}"
-            echo "git_sha=${GIT_SHA}"
+            echo "image=${DEPLOY_IMAGE}"
+            echo "git_sha=${DEPLOY_GIT_SHA}"
+            echo "release_tag=${DEPLOY_RELEASE_TAG}"
           } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Resolved deployment identity"
+            echo ""
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| release tag (observability only) | \`${DEPLOY_RELEASE_TAG:-<none>}\` |"
+            echo "| aion-runtime Git commit | \`${DEPLOY_GIT_SHA}\` |"
+            echo "| manifest digest | \`${DIGEST}\` |"
+            echo "| **DEPLOY_IMAGE (pull truth)** | \`${DEPLOY_IMAGE}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "DEPLOY_IMAGE=${DEPLOY_IMAGE}"
+          echo "DEPLOY_GIT_SHA=${DEPLOY_GIT_SHA}"
+
       - name: deploy
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: DEPLOY_IMAGE,DEPLOY_GIT_SHA
+          envs: DEPLOY_IMAGE,DEPLOY_GIT_SHA,DEPLOY_RELEASE_TAG
           script: |
             set -euo pipefail
             cd /opt/aion
-            # Point .env at the immutable aion-runtime image + its real commit SHA
-            # (release-tag builds resolve the underlying commit, not the tag name).
+            # Pull truth is the digest; GIT_SHA is the real aion-runtime commit
+            # (never a tag string). The release tag is logged for humans only.
+            echo "[deploy-vps] release_tag=${DEPLOY_RELEASE_TAG:-<none>} git_sha=${DEPLOY_GIT_SHA}"
+            echo "[deploy-vps] AION_IMAGE=${DEPLOY_IMAGE}"
+            case "${DEPLOY_IMAGE}" in *"@sha256:"*) : ;; *) echo "refusing non-digest AION_IMAGE" >&2; exit 1 ;; esac
             sudo sed -i "s#^AION_IMAGE=.*#AION_IMAGE=${DEPLOY_IMAGE}#" .env
             sudo sed -i "s#^GIT_SHA=.*#GIT_SHA=${DEPLOY_GIT_SHA}#" .env
             ./scripts/deploy.sh
         env:
           DEPLOY_IMAGE: ${{ steps.pick.outputs.image }}
           DEPLOY_GIT_SHA: ${{ steps.pick.outputs.git_sha }}
+          DEPLOY_RELEASE_TAG: ${{ steps.pick.outputs.release_tag }}

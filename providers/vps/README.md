@@ -87,16 +87,17 @@ AION_LOCAL_DB=1 ./scripts/deploy.sh
 
 - root-owned, `0600` `/opt/aion/.env` (from `.env.example`, never committed);
 - separate `DATABASE_URL` (app) vs `MIGRATION_DATABASE_URL` (migrate one-shot only);
-- immutable `AION_IMAGE=ghcr.io/ceoloo/aion-runtime:<sha>`;
+- immutable, **digest-pinned** `AION_IMAGE=ghcr.io/ceoloo/aion-runtime@sha256:<digest>`
+  (deploy-vps.yml resolves the release tag to a digest and writes it);
 - `AION_CORS_ORIGINS` = approved Vercel Console origins (comma-separated).
 
 ## Deploy (OPS-001 checklist)
 
 1. Provision `/opt/aion/.env` with production values (`AION_ENVIRONMENT=production`,
-   DB URLs, `AION_IMAGE=ghcr.io/ceoloo/aion-runtime:execution-platform-vX.Y.Z`
-   — a boot-certified immutable release tag, never `:latest` or `main`,
-   `AION_DOMAIN=runtime.aionsystems.ai`, Traefik entrypoint / cert resolver
-   matching the host).
+   DB URLs, `AION_IMAGE=ghcr.io/ceoloo/aion-runtime@sha256:<digest>` — a
+   digest-pinned, boot-certified release image, never a tag, `:latest`, or
+   `main`; `deploy-vps.yml` fills this in. `AION_DOMAIN=runtime.aionsystems.ai`,
+   Traefik entrypoint / cert resolver matching the host).
 2. Set the Traefik network vars for your topology (see the table above):
    `AION_TRAEFIK_NETWORK_EXTERNAL` + `AION_TRAEFIK_NETWORK`. For a
    `network_mode: host` Traefik, `deploy.sh` creates the bridge — no manual
@@ -131,10 +132,14 @@ Wire the Runtime to it via `AION_TRAEFIK_NETWORK` / `AION_TRAEFIK_NETWORK_EXTERN
 
 ## Deploy safety
 
-- **Image resolution:** `deploy-vps.yml` (blank `runtime_image`) resolves the
-  newest `execution-platform-vX.Y.Z` tag on `aion-runtime`, verifies the image
-  exists in GHCR, and deploys that — it never deploys `aion-runtime`'s `main`
-  HEAD (the release line can be ahead of `main`).
+- **Digest-pinned identity (no verify→deploy TOCTOU):** `deploy-vps.yml` (blank
+  `runtime_image`) resolves the newest `execution-platform-vX.Y.Z` tag,
+  dereferences the annotated Git tag to its commit SHA, `GET`s the GHCR manifest,
+  captures the authoritative `Docker-Content-Digest`, and deploys
+  `ghcr.io/ceoloo/aion-runtime@sha256:<digest>` — the verified artifact *is* the
+  pull reference. `runtime_image` pins are canonicalised the same way (any tag →
+  its digest); a non-`execution-platform-vX.Y.Z` pin also needs the `git_sha`
+  input. It never deploys a mutable tag, `:latest`, or `aion-runtime`'s `main`.
 - **Fail-closed migrations:** a failed migration aborts before the runtime is
   rolled; the previous container keeps serving.
 - **Automatic rollback:** if the new container fails readiness or the smoke
