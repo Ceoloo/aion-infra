@@ -72,7 +72,11 @@ jobs:
     name: no committed secrets
     runs-on: ubuntu-latest
     steps:
+      # Full history required: gitleaks PR mode diffs base..head and fails on
+      # shallow clones (ambiguous `sha^` revision).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
