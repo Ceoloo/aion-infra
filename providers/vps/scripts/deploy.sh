@@ -17,6 +17,25 @@ set -euo pipefail
 cd "${AION_COMPOSE_DIR:-.}"
 
 [ -f .env ] || { echo "missing .env (root-owned 0600) — see .env.example" >&2; exit 1; }
+
+# CI hands the RESOLVED digest ref + commit SHA via the environment (kept across
+# the single scoped `sudo` — /etc/sudoers.d/aion-deploy). Persist them into the
+# root-owned .env here, as root, so no `sudo sed` is granted to the deploy user.
+# Manual runs edit .env directly and set neither var.
+if [ -n "${DEPLOY_IMAGE:-}" ]; then
+  case "${DEPLOY_IMAGE}" in
+    *"@sha256:"*) : ;;
+    *) echo "DEPLOY_IMAGE must be digest-pinned (…@sha256:<64 hex>)" >&2; exit 1 ;;
+  esac
+  sed -i "s#^AION_IMAGE=.*#AION_IMAGE=${DEPLOY_IMAGE}#" .env
+  if [ -n "${DEPLOY_GIT_SHA:-}" ]; then
+    printf '%s' "${DEPLOY_GIT_SHA}" | grep -Eq '^[0-9a-f]{40}$' \
+      || { echo "DEPLOY_GIT_SHA must be a 40-hex commit SHA" >&2; exit 1; }
+    sed -i "s#^GIT_SHA=.*#GIT_SHA=${DEPLOY_GIT_SHA}#" .env
+  fi
+  echo "[deploy] .env updated from CI: AION_IMAGE=${DEPLOY_IMAGE} GIT_SHA=${DEPLOY_GIT_SHA:-<unchanged>}"
+fi
+
 # Load config for this script (compose reads .env itself for interpolation).
 set -a; . ./.env; set +a
 : "${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}"

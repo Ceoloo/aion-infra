@@ -50,11 +50,27 @@ jobs:
     # human gate (contract §5; aion-infra §13, §25). Approval pauses the job.
     environment: ${{ github.event.inputs.environment }}
     steps:
-      - name: refuse non-main for production
+      - name: guard — environment ⇒ ref
+        env:
+          TARGET_ENV: ${{ github.event.inputs.environment }}
         run: |
-          if [ "${{ github.event.inputs.environment }}" = "production" ] && [ "${GITHUB_REF}" != "refs/heads/main" ]; then
-            echo "production VPS deploy only from main" >&2; exit 1
-          fi
+          set -eu
+          case "${TARGET_ENV}" in
+            production)
+              # Defense in depth around the now-live host. The GitHub
+              # `production` Environment also enforces main-only + a required
+              # reviewer; this fails fast if either is ever misconfigured.
+              [ "${GITHUB_REF}" = "refs/heads/main" ] \
+                || { echo "::error::production deploy requires ref=main (got ${GITHUB_REF})"; exit 1; }
+              echo "production ⇐ main ✓  (GitHub Environment adds the main-only branch policy + reviewer gate)"
+              ;;
+            staging)
+              echo "staging deploy from ${GITHUB_REF}"
+              ;;
+            *)
+              echo "::error::unknown target environment '${TARGET_ENV}'"; exit 1
+              ;;
+          esac
 
       - name: resolve digest-pinned runtime image
         id: pick
@@ -194,15 +210,17 @@ jobs:
           envs: DEPLOY_IMAGE,DEPLOY_GIT_SHA,DEPLOY_RELEASE_TAG
           script: |
             set -euo pipefail
-            cd /opt/aion
-            # Pull truth is the digest; GIT_SHA is the real aion-runtime commit
-            # (never a tag string). The release tag is logged for humans only.
+            # SSH as the non-root `aion` user. The ONLY privileged action is the
+            # deployment entrypoint, via a scoped rule (/etc/sudoers.d/aion-deploy:
+            #   aion ALL=(root) NOPASSWD: /opt/aion/scripts/deploy.sh
+            # with env_keep for the three DEPLOY_* vars only). deploy.sh — running
+            # as root — writes the digest ref + commit SHA into the 0600 root:root
+            # .env itself; no `sudo sed` is granted.
+            export DEPLOY_IMAGE DEPLOY_GIT_SHA DEPLOY_RELEASE_TAG
             echo "[deploy-vps] release_tag=${DEPLOY_RELEASE_TAG:-<none>} git_sha=${DEPLOY_GIT_SHA}"
             echo "[deploy-vps] AION_IMAGE=${DEPLOY_IMAGE}"
             case "${DEPLOY_IMAGE}" in *"@sha256:"*) : ;; *) echo "refusing non-digest AION_IMAGE" >&2; exit 1 ;; esac
-            sudo sed -i "s#^AION_IMAGE=.*#AION_IMAGE=${DEPLOY_IMAGE}#" .env
-            sudo sed -i "s#^GIT_SHA=.*#GIT_SHA=${DEPLOY_GIT_SHA}#" .env
-            ./scripts/deploy.sh
+            sudo -n /opt/aion/scripts/deploy.sh
         env:
           DEPLOY_IMAGE: ${{ steps.pick.outputs.image }}
           DEPLOY_GIT_SHA: ${{ steps.pick.outputs.git_sha }}
