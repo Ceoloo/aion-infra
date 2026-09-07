@@ -28,6 +28,16 @@ the Runtime later moves.
 **Do not run Caddy next to Traefik.** One edge layer only. Legacy Caddy remains
 available as compose profile `caddy` for greenfield hosts without Traefik.
 
+### Two host-Traefik topologies
+
+| Host Traefik runs… | `AION_TRAEFIK_NETWORK_EXTERNAL` | `AION_TRAEFIK_NETWORK` | Who owns the network |
+|---|---|---|---|
+| on its own Docker network (DO/Hetzner-style) | `true` | that existing network's name | the host Traefik; deploy only attaches, and fails if absent |
+| `network_mode: host` (the Hostinger box) | `false` | `aion_edge` (any name) | **AION** — `scripts/deploy.sh` creates the bridge if missing; a host-network Traefik still routes to the container's IP on it |
+
+The Runtime never publishes `:8080`. Traefik reaches it over this network by the
+`traefik.docker.network` label; nothing else on the host can.
+
 Then:
 
 ```
@@ -83,11 +93,15 @@ AION_LOCAL_DB=1 ./scripts/deploy.sh
 ## Deploy (OPS-001 checklist)
 
 1. Provision `/opt/aion/.env` with production values (`AION_ENVIRONMENT=production`,
-   DB URLs, `AION_IMAGE`, `AION_DOMAIN=runtime.aionsystems.ai`, Traefik network /
-   entrypoint / cert resolver matching the host).
-2. Confirm host Traefik Docker network exists (`docker network ls`); set
-   `AION_TRAEFIK_NETWORK` to that name.
-3. Runtime stays on the internal compose network — **do not** publish `:8080`.
+   DB URLs, `AION_IMAGE=ghcr.io/ceoloo/aion-runtime:execution-platform-vX.Y.Z`
+   — a boot-certified immutable release tag, never `:latest` or `main`,
+   `AION_DOMAIN=runtime.aionsystems.ai`, Traefik entrypoint / cert resolver
+   matching the host).
+2. Set the Traefik network vars for your topology (see the table above):
+   `AION_TRAEFIK_NETWORK_EXTERNAL` + `AION_TRAEFIK_NETWORK`. For a
+   `network_mode: host` Traefik, `deploy.sh` creates the bridge — no manual
+   `docker network create` needed.
+3. Runtime stays on the internal + edge networks — **do not** publish `:8080`.
 4. Point DNS `A`/`AAAA` for `runtime.aionsystems.ai` at the VPS.
 5. `cd /opt/aion && ./scripts/deploy.sh` (or GitHub `deploy-vps.yml`).
 6. Verify:
@@ -112,7 +126,23 @@ into an isolated target. Mode B uses the managed provider's PITR.
 
 `scripts/bootstrap-server.sh` — Docker, ufw 22/80/443, `/opt/aion`, deploy user.
 It does **not** install Traefik; on Hostinger the edge is already present.
-Join its Docker network via `AION_TRAEFIK_NETWORK`.
+Wire the Runtime to it via `AION_TRAEFIK_NETWORK` / `AION_TRAEFIK_NETWORK_EXTERNAL`
+(see the topology table above).
+
+## Deploy safety
+
+- **Image resolution:** `deploy-vps.yml` (blank `runtime_image`) resolves the
+  newest `execution-platform-vX.Y.Z` tag on `aion-runtime`, verifies the image
+  exists in GHCR, and deploys that — it never deploys `aion-runtime`'s `main`
+  HEAD (the release line can be ahead of `main`).
+- **Fail-closed migrations:** a failed migration aborts before the runtime is
+  rolled; the previous container keeps serving.
+- **Automatic rollback:** if the new container fails readiness or the smoke
+  test, `deploy.sh` restores the previously-serving image (and rewrites
+  `.env`), then exits non-zero.
+- **Keep the previous image:** any `docker image prune -a` / `--filter until=…`
+  job on the host must exclude `ghcr.io/ceoloo/aion-runtime`, or a rollback has
+  nothing to roll back to.
 
 ## Status
 

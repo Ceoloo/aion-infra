@@ -14,7 +14,9 @@ on:
         options: [staging, production]
         default: staging
       runtime_image:
-        description: Pin a specific aion-runtime image (blank = resolve latest main SHA)
+        description: >-
+          Pin a specific aion-runtime image ref
+          (blank = newest execution-platform-vX.Y.Z release tag).
         default: ''
 
 permissions:
@@ -44,25 +46,67 @@ jobs:
           PINNED: ${{ github.event.inputs.runtime_image }}
         run: |
           set -euo pipefail
+          REPO=ghcr.io/ceoloo/aion-runtime
+
+          GIT_SHA=""
           if [ -n "${PINNED}" ]; then
-            echo "image=${PINNED}" >> "$GITHUB_OUTPUT"
+            IMAGE="${PINNED}"
+            echo "resolved from dispatch pin: ${IMAGE}"
           else
-            SHA="$(gh api repos/ceoloo/aion-runtime/commits/main --jq .sha)"
-            echo "image=ghcr.io/ceoloo/aion-runtime:${SHA}" >> "$GITHUB_OUTPUT"
+            # aion-infra CONSUMES a boot-certified immutable release image
+            # (ADR-002 + aion-runtime CI Gate A). It never deploys `main` HEAD:
+            # the release line (execution-platform-vX.Y.Z) is authoritative and
+            # can be AHEAD of aion-runtime's main.
+            TAG="$(gh api repos/ceoloo/aion-runtime/tags --paginate --jq '.[].name' \
+                   | grep -E '^execution-platform-v[0-9]+\.[0-9]+\.[0-9]+$' \
+                   | sort -V | tail -n1)"
+            [ -n "${TAG}" ] || { echo "no execution-platform-vX.Y.Z tag found" >&2; exit 1; }
+            IMAGE="${REPO}:${TAG}"
+            GIT_SHA="$(gh api repos/ceoloo/aion-runtime/git/refs/tags/${TAG} --jq '.object.sha')"
+            # annotated tag → dereference to the commit
+            TYPE="$(gh api repos/ceoloo/aion-runtime/git/tags/${GIT_SHA} --jq '.object.sha' 2>/dev/null || true)"
+            [ -n "${TYPE}" ] && GIT_SHA="${TYPE}"
+            echo "resolved newest release tag: ${TAG} -> ${IMAGE} (commit ${GIT_SHA})"
           fi
+
+          # Preflight: the image MUST already exist in GHCR (Gate A publishes it
+          # on the tag push). Fail here, before we SSH to the box.
+          REF="${IMAGE##*:}"
+          TOKEN="$(curl -fsSL "https://ghcr.io/token?scope=repository:ceoloo/aion-runtime:pull" | jq -r .token)"
+          CODE="$(curl -fsS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json' \
+            -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+            -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/ceoloo/aion-runtime/manifests/${REF}" || true)"
+          if [ "${CODE}" != "200" ]; then
+            echo "image not found in GHCR: ${IMAGE} (HTTP ${CODE})" >&2
+            echo "Gate A must have built+published this tag first." >&2
+            exit 1
+          fi
+          # Fall back to the image ref's own suffix when no commit was resolved
+          # (e.g. a dispatch pin that is itself a :<sha> tag).
+          [ -n "${GIT_SHA}" ] || GIT_SHA="${REF}"
+          echo "image present in GHCR: ${IMAGE} (git_sha=${GIT_SHA})"
+          {
+            echo "image=${IMAGE}"
+            echo "git_sha=${GIT_SHA}"
+          } >> "$GITHUB_OUTPUT"
       - name: deploy
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: DEPLOY_IMAGE
+          envs: DEPLOY_IMAGE,DEPLOY_GIT_SHA
           script: |
             set -euo pipefail
             cd /opt/aion
-            # Point .env at the immutable aion-runtime image + record its tag as GIT_SHA.
+            # Point .env at the immutable aion-runtime image + its real commit SHA
+            # (release-tag builds resolve the underlying commit, not the tag name).
             sudo sed -i "s#^AION_IMAGE=.*#AION_IMAGE=${DEPLOY_IMAGE}#" .env
-            sudo sed -i "s#^GIT_SHA=.*#GIT_SHA=${DEPLOY_IMAGE##*:}#" .env
+            sudo sed -i "s#^GIT_SHA=.*#GIT_SHA=${DEPLOY_GIT_SHA}#" .env
             ./scripts/deploy.sh
         env:
           DEPLOY_IMAGE: ${{ steps.pick.outputs.image }}
+          DEPLOY_GIT_SHA: ${{ steps.pick.outputs.git_sha }}

@@ -52,7 +52,7 @@ services:
       - traefik
     labels:
       - traefik.enable=true
-      - traefik.docker.network=${AION_TRAEFIK_NETWORK:-traefik}
+      - traefik.docker.network=${AION_TRAEFIK_NETWORK:-aion_edge}
       - traefik.http.routers.aion-runtime.rule=Host(`${AION_DOMAIN:?set AION_DOMAIN}`)
       - traefik.http.routers.aion-runtime.entrypoints=${AION_TRAEFIK_ENTRYPOINT:-websecure}
       - traefik.http.routers.aion-runtime.tls=true
@@ -104,10 +104,15 @@ services:
     networks: [edge, internal]
 
 networks:
-  # Existing host Traefik Docker network (name varies — set AION_TRAEFIK_NETWORK).
+  # The network Traefik uses to reach the Runtime. Always `external` here — it is
+  # provisioned OUTSIDE this compose file:
+  #   * host Traefik on its own network  → that pre-existing network
+  #   * host Traefik in network_mode:host → an AION-owned bridge that
+  #     scripts/deploy.sh creates when AION_TRAEFIK_NETWORK_EXTERNAL=false
+  # Either way, set AION_TRAEFIK_NETWORK to its name.
   traefik:
     external: true
-    name: ${AION_TRAEFIK_NETWORK:-traefik}
+    name: ${AION_TRAEFIK_NETWORK:-aion_edge}
   edge:
     # Used only by the optional Caddy profile.
   internal:
