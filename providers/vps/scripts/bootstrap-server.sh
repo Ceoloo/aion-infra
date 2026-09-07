@@ -54,5 +54,8 @@ install -o "${DEPLOY_USER}" -g "${DEPLOY_USER}" -m 0750 -d /opt/aion
 
 echo "[bootstrap] done. Notes:"
 echo "  - Docker daemon access ≈ root; only the ${DEPLOY_USER} deploy user is in the docker group."
-echo "  - Put providers/vps/{docker-compose.yml,Caddyfile,system,scripts} + a 0600 .env in /opt/aion."
+echo "  - Put providers/vps/{docker-compose.yml,system,scripts,traefik,legacy} + a 0600 .env in /opt/aion."
+echo "  - OPS-001: this host should already run Traefik on :80/:443. Do NOT install Caddy beside it."
+echo "  - Join Traefik's Docker network via AION_TRAEFIK_NETWORK in .env (see .env.example)."
 echo "  - Postgres (Mode A) binds to 127.0.0.1 only; never open 5432 in ufw."
+echo "  - Prefer hostname runtime.aionsystems.ai (stable) over the Hostinger machine FQDN."

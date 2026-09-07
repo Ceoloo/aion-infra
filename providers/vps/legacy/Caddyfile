@@ -1,0 +1,21 @@
+# Legacy Caddy edge (OPS-001 prefers Traefik).
+#
+# Enable only on a greenfield VPS with NO Traefik on :80/:443:
+#   AION_EDGE=caddy ./scripts/deploy.sh
+#
+# Do not run Caddy beside an existing Traefik — two edge proxies conflict.
+
+{$AION_DOMAIN} {
+	encode gzip
+
+	reverse_proxy aion-runtime:8080 {
+		health_uri /health/ready
+		health_interval 10s
+		health_timeout 3s
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

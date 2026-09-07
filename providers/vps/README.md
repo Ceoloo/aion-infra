@@ -6,105 +6,117 @@ Hostinger-specific APIs. It satisfies the same
 [deployment contract](../../contracts/deployment-contract.md) as AWS and GCP,
 running the **same runtime image** and the **same aion-data migrations**.
 
+## OPS-001 topology (canonical)
+
 ```
-Internet ──▶ Caddy (HTTPS, auto-certs) ──▶ aion-runtime ──▶ PostgreSQL
-             only 80/443 exposed          (same image)      (never public)
+DNS ──▶ runtime.<domain>          e.g. runtime.aionsystems.ai
+          │
+          ▼
+       Traefik :443               (host edge — already on this VPS)
+          │
+          ▼
+    aion-runtime :8080            (Docker; NOT published on the host)
+          │
+          ▼
+       PostgreSQL                 (Mode A local or Mode B managed — never public)
 ```
 
-One server is enough — no Kubernetes, Swarm, Consul, Nomad, RabbitMQ, or Redis.
+Prefer a **stable, provider-independent hostname** (`runtime.aionsystems.ai`) over
+a Hostinger machine FQDN so the Operator Console keeps one logical endpoint if
+the Runtime later moves.
+
+**Do not run Caddy next to Traefik.** One edge layer only. Legacy Caddy remains
+available as compose profile `caddy` for greenfield hosts without Traefik.
+
+Then:
+
+```
+Vercel Operator Console
+  └─ VITE_AION_RUNTIME_URL=https://runtime.aionsystems.ai
+```
+
+`VITE_AION_TENANT_ID` / `VITE_AION_OPERATOR_ID` are **frontend hints only**.
+Tenant isolation and actor authorization are enforced by the Execution Gateway
+(`x-aion-tenant-id` + Core policy) — never by Vite env vars.
 
 ## Layout
 
 ```
 providers/vps/
 ├── README.md
-├── docker-compose.yml     caddy + aion-runtime + optional postgres (profile local-db)
-├── Caddyfile              HTTPS reverse proxy (automatic certificates)
-├── .env.example           the VPS secrets contract (copy to a root-owned 0600 .env)
+├── docker-compose.yml     aion-runtime (+ Traefik labels) + optional postgres
+├── .env.example           secrets contract (copy to root-owned 0600 /opt/aion/.env)
+├── traefik/
+│   └── aion-runtime.yml.example   optional file-provider snippet
+├── legacy/
+│   └── Caddyfile          only with AION_EDGE=caddy (no Traefik on host)
 ├── system/
-│   └── init-roles.sh      first-boot creation of aion_app + aion_migrator (Mode A)
+│   └── init-roles.sh
 └── scripts/
-    ├── bootstrap-server.sh  minimal server hardening (Docker, firewall, deploy user)
-    ├── deploy.sh            pull → migrate (fail-closed) → roll → readiness → smoke
-    ├── backup.sh            encrypted, off-host pg_dump to S3-compatible storage
-    └── restore.sh           restore into an ISOLATED target + validate schema
+    ├── bootstrap-server.sh
+    ├── deploy.sh            pull → migrate → roll → readiness → smoke
+    ├── backup.sh
+    └── restore.sh
 ```
 
 ## Database modes (same application, config-only difference)
 
-**Mode A — local PostgreSQL** (cheapest, simplest): enable the `local-db`
-profile; Postgres runs in a container on a persistent volume, bound to
-`127.0.0.1` only. `init-roles.sh` creates the two roles at first boot; the deploy
-step applies migrations + `grants.sql`.
+**Mode A — local PostgreSQL** (cheapest, simplest):
 
 ```bash
-AION_LOCAL_DB=1 ./scripts/deploy.sh     # brings up postgres, migrates, deploys
+AION_LOCAL_DB=1 ./scripts/deploy.sh
 ```
 
-**Mode B — managed PostgreSQL** (lower operational risk): omit the `local-db`
-profile; point `DATABASE_URL`/`MIGRATION_DATABASE_URL` at a managed PostgreSQL
-(any provider) with `DATABASE_SSL=true`. **No application change** — only `.env`
-differs.
+**Mode B — managed PostgreSQL** (lower operational risk):
 
 ```bash
-./scripts/deploy.sh                      # runtime only; DB is remote
+./scripts/deploy.sh
 ```
 
-## Secrets (the VPS implementation of the secrets contract)
+## Secrets
 
-There is no managed secret store on a bare VPS, and we don't pretend otherwise
-(§12). The pragmatic secure model:
+- root-owned, `0600` `/opt/aion/.env` (from `.env.example`, never committed);
+- separate `DATABASE_URL` (app) vs `MIGRATION_DATABASE_URL` (migrate one-shot only);
+- immutable `AION_IMAGE=ghcr.io/ceoloo/aion-runtime:<sha>`;
+- `AION_CORS_ORIGINS` = approved Vercel Console origins (comma-separated).
 
-- a **root-owned, `0600`** env file at `/opt/aion/.env` (copied from
-  `.env.example`, never committed);
-- injected into the containers by Compose;
-- **separate application and migration credentials** — and the long-running
-  runtime is given an explicit env allowlist that **excludes**
-  `MIGRATION_DATABASE_URL`, so it never holds the DDL credential.
+## Deploy (OPS-001 checklist)
 
-This is weaker than a managed secret store (architecture-debt item 12); treat the
-host accordingly (see Hardening) and prefer Mode B + a managed secret source as
-you grow.
+1. Provision `/opt/aion/.env` with production values (`AION_ENVIRONMENT=production`,
+   DB URLs, `AION_IMAGE`, `AION_DOMAIN=runtime.aionsystems.ai`, Traefik network /
+   entrypoint / cert resolver matching the host).
+2. Confirm host Traefik Docker network exists (`docker network ls`); set
+   `AION_TRAEFIK_NETWORK` to that name.
+3. Runtime stays on the internal compose network — **do not** publish `:8080`.
+4. Point DNS `A`/`AAAA` for `runtime.aionsystems.ai` at the VPS.
+5. `cd /opt/aion && ./scripts/deploy.sh` (or GitHub `deploy-vps.yml`).
+6. Verify:
+   - `https://runtime…/health/live`
+   - `https://runtime…/health/ready`
+   - `https://runtime…/` (release metadata)
+   - one tenant-scoped `/v1/...` path (expects `x-aion-tenant-id`)
+7. Configure GitHub Environment secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+8. **Only then** create the Vercel `aion-operator-console` project with
+   `VITE_AION_RUNTIME_URL=https://runtime.aionsystems.ai` and set
+   `AION_CORS_ORIGINS` on Runtime to that Vercel origin.
 
-## Deploy
-
-On the server (`/opt/aion`), with a `0600` `.env` in place:
-
-```bash
-./scripts/deploy.sh          # or AION_LOCAL_DB=1 ./scripts/deploy.sh for Mode A
-```
-
-The sequence is the contract sequence: **pull immutable image → apply migrations
-(fail-closed) → roll runtime → readiness → smoke**. A failed migration aborts
-before the runtime is rolled; the previous container keeps serving. CI drives
-this over SSH — see [`.github/workflows/deploy-vps.yml`](../../.github/workflows/deploy-vps.yml).
+CI drives deploys over SSH — see
+[`.github/workflows/deploy-vps.yml`](../../.github/workflows/deploy-vps.yml).
 
 ## Backups (Mode A)
 
-`scripts/backup.sh` takes an encrypted `pg_dump` and uploads it **off the VPS**
-to a configurable S3-compatible endpoint (AWS S3, Backblaze B2, MinIO, …) — no
-object-storage vendor is hardwired. Schedule it via cron or a systemd timer.
-`scripts/restore.sh` proves recoverability by restoring into an **isolated**
-target and validating the canonical schema — it never touches the live DB.
-Mode B relies on the managed provider's backups/PITR instead.
+`scripts/backup.sh` / `scripts/restore.sh` — encrypted off-host dump; restore
+into an isolated target. Mode B uses the managed provider's PITR.
 
-## Hardening (minimal, pragmatic — §15)
+## Hardening
 
-`scripts/bootstrap-server.sh` automates the safe parts:
-
-- non-root deploy user; Docker from the official apt repo (no `curl | sh`);
-- `ufw` firewall exposing **only** 22/80/443 — the database port is never opened;
-- unattended security updates enabled;
-- app dir `/opt/aion` owned by the deploy user; `.env` `0600`.
-
-It **recommends** (not auto-applies) SSH key-only auth and disabling root login —
-review before changing SSH. Note: Docker group membership ≈ root, so only the
-deploy user is added. This is deliberately not a full enterprise hardening suite.
+`scripts/bootstrap-server.sh` — Docker, ufw 22/80/443, `/opt/aion`, deploy user.
+It does **not** install Traefik; on Hostinger the edge is already present.
+Join its Docker network via `AION_TRAEFIK_NETWORK`.
 
 ## Status
 
-**ACTIVE / LOW-COST DEPLOYMENT PROFILE.** The runtime image, migrations, health
-endpoints, and config surface are identical to AWS/GCP. The runtime + migration
-+ readiness + smoke flow is proven locally (see [`docs/phase-3.md`](../../docs/phase-3.md));
-the Docker-Compose-on-a-real-VPS step is documented but not executed in this
-build (no Docker daemon / no VPS available here).
+**ACTIVE / LOW-COST DEPLOYMENT PROFILE — Traefik edge (OPS-001).** Runtime image,
+migrations, health endpoints, and config surface are identical to AWS/GCP.
+Live VPS activation is the OPS-001 operational milestone (see aion-docs
+`roadmap/ops-001-live-runtime.md`).

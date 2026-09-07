@@ -163,8 +163,8 @@ aion-data, or product code — see [portability.md](portability.md) and
 - **Deployment contract.** `contracts/deployment-contract.md` defines the stable,
   provider-neutral workload contract (runtime, database, config surface, secret
   injection, deployment sequence, recovery).
-- **VPS profile (ACTIVE / low-cost).** `providers/vps/` — Docker Compose + Caddy
-  (auto-TLS) + the same runtime image + optional local Postgres (Mode A) or
+- **VPS profile (ACTIVE / low-cost).** `providers/vps/` — Docker Compose + Traefik
+  host edge (labels; Caddy legacy profile only) + the same runtime image + optional local Postgres (Mode A) or
   managed DB (Mode B, config-only); env-file secrets; encrypted off-host
   backup + isolated-restore scripts; minimal server hardening; SSH deploy CI.
 - **AWS profile (SUPPORTED architecture).** `providers/aws/` — full AION→AWS

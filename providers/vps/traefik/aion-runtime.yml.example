@@ -1,0 +1,25 @@
+# AION Runtime — Traefik file-provider example (optional).
+#
+# Prefer Docker labels on the aion-runtime service (see docker-compose.yml).
+# Use this snippet only when the host Traefik is configured with a file provider
+# and does not watch Docker.
+#
+# Replace runtime.aionsystems.ai / certResolver / entryPoints to match the host.
+
+http:
+  routers:
+    aion-runtime:
+      rule: Host(`runtime.aionsystems.ai`)
+      entryPoints:
+        - websecure
+      service: aion-runtime
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    aion-runtime:
+      loadBalancer:
+        servers:
+          # Reachable from Traefik's Docker network — use the compose service
+          # name if both share a network, or the container IP.
+          - url: http://aion-runtime:8080

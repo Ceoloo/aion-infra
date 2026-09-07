@@ -19,7 +19,7 @@ not inside the application.
               │              │               │
               ▼              ▼               ▼
          VPS profile    AWS profile     GCP profile
-        (Compose+Caddy) (ECS/RDS/…)    (Cloud Run/SQL)
+        (Compose+Traefik) (ECS/RDS/…)    (Cloud Run/SQL)
 ```
 
 ## What is portable (never changes between providers)
@@ -53,7 +53,7 @@ to [`providers/`](../providers/).
 | Secrets | root-owned `0600` env file | Secrets Manager | Secret Manager |
 | Secret → app | env injection | env injection | env injection |
 | Logs | stdout → Docker/journald/collector | stdout → CloudWatch | stdout → Cloud Logging |
-| TLS / ingress | Caddy (auto certs) | ALB / App Runner | Cloud Run (managed) |
+| TLS / ingress | Traefik (host edge; Caddy legacy profile only) | ALB / App Runner | Cloud Run (managed) |
 | Backups | off-host `pg_dump` (encrypted) | RDS automated + PITR | Cloud SQL + PITR |
 | CI auth | SSH deploy key (GH Env) | GitHub OIDC → IAM role | Workload Identity Federation |
 | Human prod gate | GitHub Environment | GitHub Environment | GitHub Environment |
@@ -66,7 +66,7 @@ infrastructure rows differ.
 
 | Profile | Status |
 |---|---|
-| **Generic VPS** (Hostinger/DO/Hetzner/EC2/Ubuntu) | **ACTIVE / LOW-COST DEPLOYMENT PROFILE** — working reference: Compose + Caddy + runtime + optional local Postgres; deploy/backup/restore scripts; runtime + migrations proven locally. Live SSH-deploy to a real VPS is untested here. |
+| **Generic VPS** (Hostinger/DO/Hetzner/EC2/Ubuntu) | **ACTIVE / LOW-COST DEPLOYMENT PROFILE** — Compose + **Traefik edge** (host) + runtime + optional local Postgres; deploy/backup/restore scripts; runtime + migrations proven locally. OPS-001 = first live Runtime HTTPS endpoint. Legacy Caddy is profile-only (do not run beside Traefik). |
 | **AWS** | **SUPPORTED ARCHITECTURE / SCALE-UP TARGET** — full provider mapping + minimal, `validate`-passing Terraform skeleton (ECS Fargate, RDS, Secrets Manager, ECR, CloudWatch, OIDC). Not provisioned; full productionization is a provider-activation mission. |
 | **GCP** | **SUPPORTED MANAGED DEPLOYMENT PROFILE** — complete declarative Terraform, statically validated; the original Phase 3 implementation, now behind the provider boundary. Not live (needs GCP credentials). |
 
