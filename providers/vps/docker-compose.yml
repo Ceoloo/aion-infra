@@ -36,6 +36,12 @@ services:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
       # Comma-separated Console origins (Vercel). Empty = no CORS headers.
       AION_CORS_ORIGINS: ${AION_CORS_ORIGINS:-}
+      # GHL Private Integration — required for Phase A/B live CRM plane.
+      # Set in /opt/aion/.env (0600). PIT must include contacts + opportunities
+      # scopes; locations-only is not enough for the acceptance gate.
+      GHL_API_KEY: ${GHL_API_KEY:-}
+      GHL_LOCATION_ID: ${GHL_LOCATION_ID:-}
+      GHL_API_VERSION: ${GHL_API_VERSION:-2021-07-28}
     # Internal only — never publish 8080 on the host. Traefik reaches us via
     # the external edge network + Docker labels.
     expose:
