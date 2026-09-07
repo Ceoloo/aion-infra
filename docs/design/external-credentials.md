@@ -43,12 +43,48 @@ differs by profile; the **env-var names the workload reads do not**:
 
 | Profile | Secret store | Injection |
 |---|---|---|
-| **VPS** (active) | `.env` on the host / Docker secret, root-owned, `600` | Compose `env_file` / `secrets:` → container env |
-| **GCP** | Secret Manager | Cloud Run secret-to-env mapping |
+| **VPS** (active) | root-owned `0600` `/opt/aion/.env` on the host | Compose interpolation into the **consuming service's** explicit `environment:` allowlist |
+| **GCP** | Secret Manager | Cloud Run secret-to-env mapping on the consuming service |
 | **AWS** | Secrets Manager / SSM Parameter Store | ECS task-definition `secrets` → env |
 
 The workload is identical across all three; switching profiles never changes how
 code reads the credential (capability-over-vendor).
+
+### VPS: which service gets the credential
+
+On the VPS profile these secrets are declared in `providers/vps/.env.example`
+(placeholders; the real values live only in the server's `/opt/aion/.env`). They
+are **not** added to the `aion-runtime` service. That service is the Core+Data
+composition root — it makes no model or CRM calls — and its Compose `environment:`
+block is a **deliberate least-privilege allowlist** (it even withholds
+`MIGRATION_DATABASE_URL`). Adding an integration key there would grant the
+runtime a credential it has no use for, violating least privilege.
+
+Instead, the **consuming service** (e.g. the Revenue Copilot product, or any
+integration service that hosts the OpenRouter provider / GHL tool adapter)
+declares each variable in its **own** explicit `environment:` allowlist when it
+is added to the Compose stack:
+
+```yaml
+# example: a product/integration service added to providers/vps/docker-compose.yml
+services:
+  revenue-copilot:
+    image: ${COPILOT_IMAGE:?set COPILOT_IMAGE}
+    environment:
+      AION_ENVIRONMENT: ${AION_ENVIRONMENT}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # only what THIS service needs — least privilege, like aion-runtime:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set in .env}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-3.5-sonnet}
+      GHL_API_KEY: ${GHL_API_KEY:?set in .env}
+      GHL_LOCATION_ID: ${GHL_LOCATION_ID}
+      GHL_API_VERSION: ${GHL_API_VERSION:-2021-07-28}
+    networks: [internal]
+```
+
+Until a consuming service is deployed on the VPS, the keys can sit in
+`/opt/aion/.env` unused, or be omitted entirely — nothing on the box reads them
+yet. Rotation is: edit `/opt/aion/.env`, then re-roll the consuming service.
 
 ## Least privilege
 
