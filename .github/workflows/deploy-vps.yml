@@ -216,6 +216,7 @@ jobs:
             # with env_keep for the three DEPLOY_* vars only). deploy.sh — running
             # as root — writes the digest ref + commit SHA into the 0600 root:root
             # .env itself; no `sudo sed` is granted.
+            cd /opt/aion
             export DEPLOY_IMAGE DEPLOY_GIT_SHA DEPLOY_RELEASE_TAG
             echo "[deploy-vps] release_tag=${DEPLOY_RELEASE_TAG:-<none>} git_sha=${DEPLOY_GIT_SHA}"
             echo "[deploy-vps] AION_IMAGE=${DEPLOY_IMAGE}"
