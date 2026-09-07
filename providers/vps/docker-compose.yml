@@ -70,6 +70,48 @@ services:
       - traefik.http.middlewares.aion-cors.headers.addVaryHeader=true
       - traefik.http.routers.aion-runtime.middlewares=aion-cors@docker
 
+  # ── Revenue Copilot HTTP service (MISSION-001 entrypoint shape #2) ─────────
+  # Enable with: docker compose --profile revenue-copilot up -d
+  # Consumes OpenRouter from /opt/aion/.env; does NOT inject keys into runtime.
+  # GHL writes stay unwired until Execution Gateway at-most-once is certified.
+  revenue-copilot:
+    profiles: ["revenue-copilot"]
+    image: ${COPILOT_IMAGE:?set COPILOT_IMAGE for revenue-copilot profile}
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      AION_ENVIRONMENT: ${AION_ENVIRONMENT}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+      GIT_SHA: ${GIT_SHA:-unknown}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-3.5-sonnet}
+      # GHL_* reserved — read-only wiring later; writes blocked until gateway:
+      # GHL_API_KEY: ${GHL_API_KEY}
+      # GHL_LOCATION_ID: ${GHL_LOCATION_ID}
+      # GHL_API_VERSION: ${GHL_API_VERSION:-2021-07-28}
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    stop_grace_period: 30s
+    networks:
+      - internal
+      - traefik
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${AION_TRAEFIK_NETWORK:-aion_edge}
+      - traefik.http.routers.aion-copilot.rule=Host(`${COPILOT_DOMAIN:-copilot.${AION_DOMAIN}}`)
+      - traefik.http.routers.aion-copilot.entrypoints=${AION_TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.aion-copilot.tls=true
+      - traefik.http.routers.aion-copilot.tls.certresolver=${AION_TRAEFIK_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.services.aion-copilot.loadbalancer.server.port=8080
+      - traefik.http.routers.aion-copilot.service=aion-copilot
+
   # ── OPTIONAL local PostgreSQL (Mode A). Enable with --profile local-db ────
   postgres:
     image: postgres:16-alpine
