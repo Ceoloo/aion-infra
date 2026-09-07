@@ -87,7 +87,15 @@ PREV_CID="$(compose ps -q aion-runtime 2>/dev/null || true)"
 PREV_IMAGE=""
 PREV_GIT_SHA=""
 if [ -n "${PREV_CID}" ]; then
-  PREV_IMAGE="$(docker inspect -f '{{.Config.Image}}' "${PREV_CID}" 2>/dev/null || true)"
+  # Prefer an IMMUTABLE repo@sha256 ref for the rollback target so a revert is
+  # itself digest-pinned. Fall back to whatever the container was created with
+  # (a tag ref on older/manual deploys).
+  PREV_IMG_ID="$(docker inspect -f '{{.Image}}' "${PREV_CID}" 2>/dev/null || true)"
+  if [ -n "${PREV_IMG_ID}" ]; then
+    PREV_IMAGE="$( { docker inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "${PREV_IMG_ID}" 2>/dev/null \
+                     | grep -E '^ghcr\.io/ceoloo/aion-runtime@sha256:[a-f0-9]{64}$' | head -n1; } || true )"
+  fi
+  [ -n "${PREV_IMAGE}" ] || PREV_IMAGE="$(docker inspect -f '{{.Config.Image}}' "${PREV_CID}" 2>/dev/null || true)"
   PREV_GIT_SHA="$( { docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${PREV_CID}" 2>/dev/null \
                     | sed -n 's/^GIT_SHA=//p' | head -n1; } || true )"
   echo "[deploy] previous runtime: ${PREV_IMAGE:-<unknown>} (GIT_SHA=${PREV_GIT_SHA:-<unknown>})"
@@ -112,7 +120,12 @@ rollback() {
     # Put .env back so a later manual `docker compose up` does not re-deploy the
     # bad revision (the caller/workflow set these to the new image).
     sed -i "s#^AION_IMAGE=.*#AION_IMAGE=${PREV_IMAGE}#" .env
-    sed -i "s#^GIT_SHA=.*#GIT_SHA=${PREV_GIT_SHA:-${PREV_IMAGE##*:}}#" .env
+    if [ -n "${PREV_GIT_SHA}" ]; then
+      sed -i "s#^GIT_SHA=.*#GIT_SHA=${PREV_GIT_SHA}#" .env
+    else
+      # Never write a digest hex (…@sha256:<hex>) into GIT_SHA — leave the line as is.
+      echo "[deploy] (rollback: previous GIT_SHA unknown — GIT_SHA in .env left unchanged)" >&2
+    fi
     roll_runtime "${PREV_IMAGE}" || true
     if wait_healthy; then
       echo "[deploy] rollback restored a healthy previous revision (${PREV_IMAGE})" >&2
