@@ -49,12 +49,28 @@ cat <<'EOF'
   Add the deploy user's public key to /home/aion/.ssh/authorized_keys (0600).
 EOF
 
-echo "[bootstrap] app dir /opt/aion (deploy the compose profile here; .env 0600)"
-install -o "${DEPLOY_USER}" -g "${DEPLOY_USER}" -m 0750 -d /opt/aion
+echo "[bootstrap] app dir /opt/aion — ROOT-OWNED (deploy the compose profile here)"
+# Root-owned so the scoped-sudo model holds: the deploy user must not be able to
+# edit the script it may run as root, nor read the 0600 .env. It only needs
+# read+traverse. deploy.sh (running as root) writes .env itself.
+install -o root -g root -m 0755 -d /opt/aion
+
+echo "[bootstrap] scoped sudo: ${DEPLOY_USER} may run ONLY the deploy entrypoint as root"
+cat > /etc/sudoers.d/aion-deploy <<EOF
+# CI deploy path: the ONLY privileged action is the deployment entrypoint.
+# CI passes the resolved digest ref + commit SHA via these env vars; keep them
+# across sudo for this one command only. No shell, no wildcards, no sed-as-root.
+Defaults!/opt/aion/scripts/deploy.sh  env_keep += "DEPLOY_IMAGE DEPLOY_GIT_SHA DEPLOY_RELEASE_TAG"
+${DEPLOY_USER} ALL=(root) NOPASSWD: /opt/aion/scripts/deploy.sh
+EOF
+chmod 0440 /etc/sudoers.d/aion-deploy
+visudo -c -f /etc/sudoers.d/aion-deploy
 
 echo "[bootstrap] done. Notes:"
 echo "  - Docker daemon access ≈ root; only the ${DEPLOY_USER} deploy user is in the docker group."
-echo "  - Put providers/vps/{docker-compose.yml,system,scripts,traefik,legacy} + a 0600 .env in /opt/aion."
+echo "  - Put providers/vps/{docker-compose.yml,system,scripts,traefik,legacy} in /opt/aion as ROOT (0644/0755)."
+echo "  - Create /opt/aion/.env as root:root 0600 from .env.example (contains AION_LOCAL_DB + secrets)."
+echo "  - CI SSHes as ${DEPLOY_USER} and runs: sudo -n /opt/aion/scripts/deploy.sh   (scoped rule above)."
 echo "  - OPS-001: this host should already run Traefik on :80/:443. Do NOT install Caddy beside it."
 echo "  - Join Traefik's Docker network via AION_TRAEFIK_NETWORK in .env (see .env.example)."
 echo "  - Postgres (Mode A) binds to 127.0.0.1 only; never open 5432 in ufw."

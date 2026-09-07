@@ -148,6 +148,16 @@ Wire the Runtime to it via `AION_TRAEFIK_NETWORK` / `AION_TRAEFIK_NETWORK_EXTERN
 - **Keep the previous image:** any `docker image prune -a` / `--filter until=…`
   job on the host must exclude `ghcr.io/ceoloo/aion-runtime`, or a rollback has
   nothing to roll back to.
+- **Least-privilege deploy path:** CI connects with a dedicated key as the
+  non-root `aion` user, whose *only* root capability is
+  `sudo -n /opt/aion/scripts/deploy.sh` (`/etc/sudoers.d/aion-deploy`, with
+  `env_keep` for `DEPLOY_IMAGE` / `DEPLOY_GIT_SHA` / `DEPLOY_RELEASE_TAG` only).
+  `/opt/aion` is root-owned; the `0600 root:root` `.env` is written by
+  `deploy.sh` itself (running as root) from those env vars — the deploy user is
+  granted no `sudo sed` and cannot read `.env`.
+- **Environment ⇒ ref guard:** the workflow refuses a `production` run from any
+  ref but `main`, on top of the GitHub `production` Environment's own main-only
+  branch policy + required-reviewer gate.
 
 ## Status
 
