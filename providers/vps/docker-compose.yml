@@ -79,7 +79,7 @@ services:
   # ── Revenue Copilot HTTP service (MISSION-001 entrypoint shape #2) ─────────
   # Enable with: docker compose --profile revenue-copilot up -d
   # Consumes OpenRouter from /opt/aion/.env; does NOT inject keys into runtime.
-  # GHL writes stay unwired until Execution Gateway at-most-once is certified.
+  # Must point at Execution Gateway Runtime for durable /v1 commands.
   revenue-copilot:
     profiles: ["revenue-copilot"]
     image: ${COPILOT_IMAGE:?set COPILOT_IMAGE for revenue-copilot profile}
@@ -92,6 +92,10 @@ services:
       GIT_SHA: ${GIT_SHA:-unknown}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-3.5-sonnet}
+      # Durable Runtime — required for production /api → /v1/commands path.
+      # Prefer live Hostinger FQDN until runtime.aionsystems.ai DNS resolves.
+      AION_RUNTIME_URL: ${AION_RUNTIME_URL:-https://runtime.srv1655818.hstgr.cloud}
+      AION_TENANT_ID: ${AION_TENANT_ID:-aion-systems}
       # GHL_* reserved — read-only wiring later; writes blocked until gateway:
       # GHL_API_KEY: ${GHL_API_KEY}
       # GHL_LOCATION_ID: ${GHL_LOCATION_ID}
