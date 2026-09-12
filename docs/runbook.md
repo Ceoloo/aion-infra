@@ -51,6 +51,20 @@ URL="$(gcloud run services describe ${PREFIX}-runtime --project ${PROJECT_ID} \
 URL="${URL}" scripts/health-check.sh          # mints an identity token via gcloud
 ```
 
+### P0 revenue-path readiness (VPS / any HTTPS Runtime)
+
+Non-destructive live+ready+CORS/env checklist (no deploy):
+
+```bash
+URL=https://runtime.aionsystems.ai \
+  CHECK_SERVICES=1 \
+  CORS_ORIGIN=https://aion-operator-console.vercel.app \
+  scripts/verify-p0-runtime-readiness.sh
+```
+
+See [p0-overnight-readiness.md](p0-overnight-readiness.md). **Do not AI-auto-deploy
+production** — human gate only ([deployment.md](deployment.md)).
+
 ## Inspect logs
 
 ```bash

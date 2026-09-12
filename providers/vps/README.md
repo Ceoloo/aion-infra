@@ -106,11 +106,16 @@ AION_LOCAL_DB=1 ./scripts/deploy.sh
 3. Runtime stays on the internal + edge networks — **do not** publish `:8080`.
 4. Point DNS `A`/`AAAA` for `runtime.aionsystems.ai` at the VPS.
 5. `cd /opt/aion && ./scripts/deploy.sh` (or GitHub `deploy-vps.yml`).
-6. Verify:
-   - `https://runtime…/health/live`
-   - `https://runtime…/health/ready`
-   - `https://runtime…/` (release metadata)
-   - one tenant-scoped `/v1/...` path (expects `x-aion-tenant-id`)
+6. Verify (non-destructive; preferred overnight / P0 gate):
+   ```bash
+   URL=https://runtime.aionsystems.ai \
+     CHECK_SERVICES=1 \
+     CORS_ORIGIN=https://aion-operator-console.vercel.app \
+     ../../scripts/verify-p0-runtime-readiness.sh
+   ```
+   Or manually: `/health/live`, `/health/ready`, `/` release JSON, one
+   tenant-scoped `/v1/...` path (expects `x-aion-tenant-id`). Full checklist:
+   [docs/p0-overnight-readiness.md](../../docs/p0-overnight-readiness.md).
 7. Configure GitHub Environment secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 8. **Only then** create the Vercel `aion-operator-console` project with
    `VITE_AION_RUNTIME_URL=https://runtime.aionsystems.ai`, set `AION_CORS_ORIGINS`
@@ -118,6 +123,7 @@ AION_LOCAL_DB=1 ./scripts/deploy.sh
    the `aion-cors` middleware. Preflight check:
    `curl -i -X OPTIONS https://runtime…/v1/services -H 'Origin: <vercel origin>' -H 'Access-Control-Request-Method: GET'`
    → `204` + `Access-Control-Allow-Origin: <vercel origin>`.
+   **Do not AI-auto-deploy production** — human reviewers only.
 
 CI drives deploys over SSH — see
 [`.github/workflows/deploy-vps.yml`](../../.github/workflows/deploy-vps.yml).
