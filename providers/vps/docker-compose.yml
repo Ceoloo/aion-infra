@@ -69,8 +69,10 @@ services:
       # The Runtime image is origin-agnostic; Traefik answers preflight and adds
       # Access-Control-* for exactly the origins in AION_CORS_ORIGINS (empty ⇒ no
       # CORS headers ⇒ same-origin/edge only). No credentials (token/header auth).
+      # PATCH is required for Operator Console mission close / terminalOutcome
+      # (OL-001 M001 close sequence). Keep in sync with aion-runtime CORS.
       - traefik.http.middlewares.aion-cors.headers.accessControlAllowOriginList=${AION_CORS_ORIGINS:-}
-      - traefik.http.middlewares.aion-cors.headers.accessControlAllowMethods=GET,POST,OPTIONS
+      - traefik.http.middlewares.aion-cors.headers.accessControlAllowMethods=GET,POST,PATCH,OPTIONS
       - traefik.http.middlewares.aion-cors.headers.accessControlAllowHeaders=content-type,authorization,x-aion-tenant-id,x-aion-operator-id
       - traefik.http.middlewares.aion-cors.headers.accessControlMaxAge=86400
       - traefik.http.middlewares.aion-cors.headers.addVaryHeader=true

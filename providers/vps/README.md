@@ -91,6 +91,7 @@ AION_LOCAL_DB=1 ./scripts/deploy.sh
   (deploy-vps.yml resolves the release tag to a digest and writes it);
 - `AION_CORS_ORIGINS` = approved Vercel Console origins (comma-separated);
   enforced by the Traefik `aion-cors` middleware, not the Runtime.
+  Methods must include `GET,POST,PATCH,OPTIONS` (PATCH = mission close).
 
 ## Deploy (OPS-001 checklist)
 
@@ -115,9 +116,22 @@ AION_LOCAL_DB=1 ./scripts/deploy.sh
 8. **Only then** create the Vercel `aion-operator-console` project with
    `VITE_AION_RUNTIME_URL=https://runtime.aionsystems.ai`, set `AION_CORS_ORIGINS`
    to that Vercel origin, and recreate the Runtime container so Traefik picks up
-   the `aion-cors` middleware. Preflight check:
-   `curl -i -X OPTIONS https://runtime…/v1/services -H 'Origin: <vercel origin>' -H 'Access-Control-Request-Method: GET'`
-   → `204` + `Access-Control-Allow-Origin: <vercel origin>`.
+   the `aion-cors` middleware. Preflight check (include PATCH — mission close):
+   `curl -i -X OPTIONS https://runtime…/v1/missions -H 'Origin: <vercel origin>' -H 'Access-Control-Request-Method: PATCH' -H 'Access-Control-Request-Headers: content-type,authorization'`
+   → `200`/`204` + `Access-Control-Allow-Origin: <vercel origin>` + methods include `PATCH`.
+
+### Sync compose labels before image roll
+
+`deploy-vps.yml` only updates `AION_IMAGE` / `GIT_SHA` and re-rolls the
+container. It does **not** pull `docker-compose.yml` from git. After merging a
+Traefik label change (e.g. CORS methods), copy the updated compose onto the
+host before the next roll:
+
+```bash
+# on a machine with SSH to the VPS (as root or with write to /opt/aion)
+scp providers/vps/docker-compose.yml root@<vps>:/opt/aion/docker-compose.yml
+# then approve / re-run deploy-vps (or: cd /opt/aion && sudo ./scripts/deploy.sh)
+```
 
 CI drives deploys over SSH — see
 [`.github/workflows/deploy-vps.yml`](../../.github/workflows/deploy-vps.yml).
