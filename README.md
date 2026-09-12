@@ -91,10 +91,11 @@ aion-infra/
 │   ├── vps/     compose · Traefik labels · scripts (deploy/backup/restore/bootstrap) · system
 │   ├── aws/     README · architecture.md · terraform (minimal, validates)
 │   └── gcp/     README · terraform (modules + environments) · scripts (gcloud)
-├── scripts/     verify · portability-check · health-check · smoke-test · backup-restore-selftest
+├── scripts/     verify · portability-check · health-check · smoke-test ·
+│                verify-p0-runtime-readiness · backup-restore-selftest
 ├── docs/        architecture · environments · security · networking · database ·
-│                deployment · observability · backup-recovery · runbook ·
-│                portability · phase-3 · adr/
+│                deployment · p0-overnight-readiness · observability · backup-recovery ·
+│                runbook · portability · phase-3 · adr/
 └── .github/     workflows (validate · deploy-gcp · deploy-vps) + gcp-deploy action
 ```
 
@@ -121,6 +122,10 @@ aion-infra/
 - **Infra portability checks:** `scripts/portability-check.sh` → **10/10 pass**
   (fixture removed, infra builds no image, all profiles consume the aion-runtime
   image + same migrate entrypoint, provider tech confined).
+- **P0 live readiness (non-destructive):**
+  `URL=https://… scripts/verify-p0-runtime-readiness.sh` — live/ready, release
+  JSON, optional `/v1/services` + CORS; documents secrets boundaries without
+  printing values. See [docs/p0-overnight-readiness.md](docs/p0-overnight-readiness.md).
 - **Runtime host:** the runtime-source + acceptance checks run in
   [aion-runtime](https://github.com/Ceoloo/aion-runtime)'s CI (portability 9/9;
   migrate → deploy → readiness → smoke against an ephemeral Postgres).

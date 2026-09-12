@@ -55,38 +55,42 @@ code reads the credential (capability-over-vendor).
 ### VPS: which service gets the credential
 
 On the VPS profile these secrets are declared in `providers/vps/.env.example`
-(placeholders; the real values live only in the server's `/opt/aion/.env`). They
-are **not** added to the `aion-runtime` service. That service is the Core+Data
-composition root — it makes no model or CRM calls — and its Compose `environment:`
-block is a **deliberate least-privilege allowlist** (it even withholds
-`MIGRATION_DATABASE_URL`). Adding an integration key there would grant the
-runtime a credential it has no use for, violating least privilege.
+(placeholders; the real values live only in the server's `/opt/aion/.env`).
+Compose uses **per-service allowlists** (least privilege; Runtime still withholds
+`MIGRATION_DATABASE_URL`):
 
-Instead, the **consuming service** (e.g. the Revenue Copilot product, or any
-integration service that hosts the OpenRouter provider / GHL tool adapter)
-declares each variable in its **own** explicit `environment:` allowlist when it
-is added to the Compose stack:
+| Credential | Injected into | Not injected into |
+|---|---|---|
+| `GHL_*` | `aion-runtime` (Phase A/B CRM via adapter + Execution Gateway) | Revenue Copilot (GHL writes blocked until gateway; keys stay off Copilot) |
+| `OPENROUTER_*` | `revenue-copilot` profile only | `aion-runtime` |
+| `DATABASE_URL` | `aion-runtime` | Copilot / browser |
+| `MIGRATION_DATABASE_URL` | migrate one-shot only | long-running Runtime |
 
 ```yaml
-# example: a product/integration service added to providers/vps/docker-compose.yml
+# providers/vps/docker-compose.yml (authoritative wiring)
 services:
-  revenue-copilot:
-    image: ${COPILOT_IMAGE:?set COPILOT_IMAGE}
+  aion-runtime:
     environment:
-      AION_ENVIRONMENT: ${AION_ENVIRONMENT}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      # only what THIS service needs — least privilege, like aion-runtime:
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set in .env}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-3.5-sonnet}
-      GHL_API_KEY: ${GHL_API_KEY:?set in .env}
-      GHL_LOCATION_ID: ${GHL_LOCATION_ID}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      AION_CORS_ORIGINS: ${AION_CORS_ORIGINS:-}
+      GHL_API_KEY: ${GHL_API_KEY:-}
+      GHL_LOCATION_ID: ${GHL_LOCATION_ID:-}
       GHL_API_VERSION: ${GHL_API_VERSION:-2021-07-28}
-    networks: [internal]
+      # OPENROUTER_* intentionally absent
+  revenue-copilot:
+    profiles: ["revenue-copilot"]
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-3.5-sonnet}
+      AION_RUNTIME_URL: ${AION_RUNTIME_URL:-https://runtime…}
+      # GHL_* reserved / commented — not injected today
 ```
 
-Until a consuming service is deployed on the VPS, the keys can sit in
-`/opt/aion/.env` unused, or be omitted entirely — nothing on the box reads them
-yet. Rotation is: edit `/opt/aion/.env`, then re-roll the consuming service.
+Keys may sit in `/opt/aion/.env` unused until the consuming profile is enabled.
+Rotation: edit `/opt/aion/.env`, then re-roll **only** the service that reads
+that key (Runtime for GHL, Copilot for OpenRouter). Browser / Vercel `VITE_*`
+must never receive provider keys — see
+[p0-overnight-readiness.md](../p0-overnight-readiness.md).
 
 ## Least privilege
 

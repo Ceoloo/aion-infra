@@ -51,6 +51,17 @@ reference — so rollback is deterministic and `/health`'s `git_sha` answers
 5. **Smoke test** — `scripts/smoke-test.sh` verifies reachability, health, and
    that the deployed SHA matches (§45).
 
+## P0 overnight readiness (OPS-001 — verify only)
+
+For the live Traefik → Runtime → Postgres path (and Console CORS coupling), use
+the non-destructive checklist and script — **no deploy**:
+
+- Doc: [p0-overnight-readiness.md](p0-overnight-readiness.md)
+- Script: `URL=https://runtime… scripts/verify-p0-runtime-readiness.sh`
+
+Overnight / AI agents may run that script and open PRs; they must **not**
+dispatch production `deploy-vps.yml` / `deploy-gcp.yml` or SSH-roll production.
+
 ## The production human gate (§25, §64 — hard exit criterion)
 
 Production release requires deliberate human authorization; **no AI worker
