@@ -91,14 +91,28 @@ AION_LOCAL_DB=1 ./scripts/deploy.sh
   (deploy-vps.yml resolves the release tag to a digest and writes it);
 - `AION_CORS_ORIGINS` = approved Vercel Console origins (comma-separated);
   enforced by the Traefik `aion-cors` middleware, not the Runtime.
+  Methods must include `GET,POST,PATCH,OPTIONS` (PATCH = mission close).
+- **ADR-005 auth (Track A):** `AION_AUTH_MODE=required` and
+  `AION_GATEWAY_API_KEYS` (JSON array of token→principal) must be set in
+  `/opt/aion/.env` only — compose injects them into `aion-runtime`. Without
+  them, Runtime tip with identity plane fails startup or rejects product
+  callers. For Revenue Copilot, also set `AION_RUNTIME_API_KEY` to a
+  **service** principal token that appears in `AION_GATEWAY_API_KEYS`
+  (`kind=service`, roles include `invoke`, `tenantIds` includes
+  `aion-systems`). Operator Console / ops need a separate **operator**
+  principal with `approve` + `invoke`. Never commit real tokens.
 
 ## Deploy (OPS-001 checklist)
 
 1. Provision `/opt/aion/.env` with production values (`AION_ENVIRONMENT=production`,
    DB URLs, `AION_IMAGE=ghcr.io/ceoloo/aion-runtime@sha256:<digest>` — a
    digest-pinned, boot-certified release image, never a tag, `:latest`, or
-   `main`; `deploy-vps.yml` fills this in. `AION_DOMAIN=runtime.aionsystems.ai`,
-   Traefik entrypoint / cert resolver matching the host).
+   `main`; `deploy-vps.yml` fills this in. **Track A:** pin a Runtime tip from
+   `main` at/after identity+durability (ADR-005), not only
+   `execution-platform-v0.2.2`. `AION_DOMAIN=runtime.aionsystems.ai`,
+   Traefik entrypoint / cert resolver matching the host). Set
+   `AION_AUTH_MODE=required` and a real `AION_GATEWAY_API_KEYS` JSON array
+   (placeholders in `.env.example`).
 2. Set the Traefik network vars for your topology (see the table above):
    `AION_TRAEFIK_NETWORK_EXTERNAL` + `AION_TRAEFIK_NETWORK`. For a
    `network_mode: host` Traefik, `deploy.sh` creates the bridge — no manual
@@ -120,10 +134,25 @@ AION_LOCAL_DB=1 ./scripts/deploy.sh
 8. **Only then** create the Vercel `aion-operator-console` project with
    `VITE_AION_RUNTIME_URL=https://runtime.aionsystems.ai`, set `AION_CORS_ORIGINS`
    to that Vercel origin, and recreate the Runtime container so Traefik picks up
-   the `aion-cors` middleware. Preflight check:
-   `curl -i -X OPTIONS https://runtime…/v1/services -H 'Origin: <vercel origin>' -H 'Access-Control-Request-Method: GET'`
-   → `204` + `Access-Control-Allow-Origin: <vercel origin>`.
+   the `aion-cors` middleware. Preflight check (include PATCH — mission close):
+   `curl -i -X OPTIONS https://runtime…/v1/missions -H 'Origin: <vercel origin>' -H 'Access-Control-Request-Method: PATCH' -H 'Access-Control-Request-Headers: content-type,authorization'`
+   → `200`/`204` + `Access-Control-Allow-Origin: <vercel origin>` + methods include `PATCH`.
    **Do not AI-auto-deploy production** — human reviewers only.
+
+### Sync compose labels before image roll
+
+`deploy-vps.yml` only updates `AION_IMAGE` / `GIT_SHA` and re-rolls the
+container. It does **not** pull `docker-compose.yml` from git. After merging a
+Traefik label or Runtime env allowlist change (CORS methods, `AION_AUTH_MODE`,
+`AION_GATEWAY_API_KEYS`), copy the updated compose onto the host and ensure
+`/opt/aion/.env` has the new secrets **before** the next roll:
+
+```bash
+# on a machine with SSH to the VPS (as root or with write to /opt/aion)
+scp providers/vps/docker-compose.yml root@<vps>:/opt/aion/docker-compose.yml
+# edit /opt/aion/.env (0600 root:root) — set AION_GATEWAY_API_KEYS + Copilot key
+# then approve / re-run deploy-vps (or: cd /opt/aion && sudo ./scripts/deploy.sh)
+```
 
 CI drives deploys over SSH — see
 [`.github/workflows/deploy-vps.yml`](../../.github/workflows/deploy-vps.yml).
