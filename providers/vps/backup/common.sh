@@ -11,6 +11,23 @@ SECRETS_DIR="/root/.backup-secrets"
 GNUPGHOME="$SECRETS_DIR/gnupg"
 export GNUPGHOME
 GPG_RECIPIENT_FILE="$SECRETS_DIR/gnupg/fingerprint.txt"
+# Routine backups need ONLY the public key (above). The private key + passphrase are needed only by verify / restore drills.
+# They are looked up in AION_RESTORE_KEY_DIR (default: the host secrets dir, today's behaviour), so an operator can supply them
+# at run time from tmpfs (see docs/offhost-key-custody.md) and the host need not hold them. Override individually with
+# AION_RESTORE_KEY_FILE / AION_RESTORE_PASSPHRASE_FILE.
+RESTORE_KEY_DIR="${AION_RESTORE_KEY_DIR:-$SECRETS_DIR}"
+RESTORE_KEY_FILE="${AION_RESTORE_KEY_FILE:-$RESTORE_KEY_DIR/PRIVATE_KEY_SAVE_OFFSITE_THEN_DELETE.asc}"
+RESTORE_PASSPHRASE_FILE="${AION_RESTORE_PASSPHRASE_FILE:-$RESTORE_KEY_DIR/PRIVATE_KEY_PASSPHRASE.txt}"
+require_restore_key() {   # fail early and clearly, without printing anything secret
+    [ -r "$RESTORE_KEY_FILE" ] && [ -r "$RESTORE_PASSPHRASE_FILE" ] && return 0
+    log_error "decryption credentials not available: need a readable key file and passphrase file (AION_RESTORE_KEY_DIR / AION_RESTORE_KEY_FILE / AION_RESTORE_PASSPHRASE_FILE; see docs/offhost-key-custody.md)"
+    return 1
+}
+read_restore_passphrase() {   # 'Passphrase: <x>' line if present, else the first line of the file
+    local pw; pw="$(sed -n 's/^Passphrase:[[:space:]]*//p' "$RESTORE_PASSPHRASE_FILE" | head -1)"
+    [ -n "$pw" ] || pw="$(head -1 "$RESTORE_PASSPHRASE_FILE")"
+    printf '%s' "$pw"
+}
 
 [ -f "$SECRETS_DIR/b2.env" ] && source "$SECRETS_DIR/b2.env"
 [ -f "$SECRETS_DIR/ntfy.env" ] && source "$SECRETS_DIR/ntfy.env"

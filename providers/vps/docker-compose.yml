@@ -46,6 +46,8 @@ services:
       GHL_API_KEY: ${GHL_API_KEY:-}
       GHL_LOCATION_ID: ${GHL_LOCATION_ID:-}
       GHL_API_VERSION: ${GHL_API_VERSION:-2021-07-28}
+      # Explicit CRM backend (live|fake). Production must set live; unset falls back to inferred-live with a warning (see aion-runtime backend-policy).
+      GHL_BACKEND: ${GHL_BACKEND:-}
     # Internal only — never publish 8080 on the host. Traefik reaches us via
     # the external edge network + Docker labels.
     expose:

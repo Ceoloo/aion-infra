@@ -59,9 +59,10 @@ scope_check() {
   [ "$bad" = 0 ] && { log_info "scope OK: $n entries, all inside the allow-list, no key material"; return 0; }; return 1
 }
 setup_offline_keyring() {
+  require_restore_key || return 1
   OFFT="$(mktemp -d)"; chmod 700 "$OFFT"; echo "allow-loopback-pinentry" > "$OFFT/gpg-agent.conf"
-  GNUPGHOME="$OFFT" gpg --batch --yes --import "$SECRETS_DIR/PRIVATE_KEY_SAVE_OFFSITE_THEN_DELETE.asc" >/dev/null 2>&1 || { log_error "offline key import failed"; return 1; }
-  OFFPW="$(sed -n 's/^Passphrase:[[:space:]]*//p' "$SECRETS_DIR/PRIVATE_KEY_PASSPHRASE.txt")"
+  GNUPGHOME="$OFFT" gpg --batch --yes --import "$RESTORE_KEY_FILE" >/dev/null 2>&1 || { log_error "offline key import failed"; return 1; }
+  OFFPW="$(read_restore_passphrase)"
 }
 teardown_offline_keyring() {
   GNUPGHOME="$OFFT" gpgconf --kill gpg-agent >/dev/null 2>&1; find "$OFFT" -type f -exec shred -u {} \; 2>/dev/null; rm -rf "$OFFT"; OFFT=""; OFFPW=""

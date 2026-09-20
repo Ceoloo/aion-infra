@@ -34,7 +34,8 @@ trap cleanup EXIT
 
 log_info "=== aion-runtime restore drill starting (stamp=${STAMP}, mode=${MODE}) ==="
 
-OFFLINE_KEY="$SECRETS_DIR/PRIVATE_KEY_SAVE_OFFSITE_THEN_DELETE.asc"
+require_restore_key || exit 1
+OFFLINE_KEY="$RESTORE_KEY_FILE"
 if [ ! -f "$OFFLINE_KEY" ]; then
     log_error "Offline private key not found at $OFFLINE_KEY"
     exit 1
@@ -46,7 +47,7 @@ gpgconf --kill gpg-agent >>"$LOG_FILE" 2>&1 || true
 gpg --batch --yes --import "$OFFLINE_KEY" >>"$LOG_FILE" 2>&1
 gpg --list-secret-keys >>"$LOG_FILE" 2>&1 || { log_error "key import failed"; exit 1; }
 log_info "Offline private key imported into a THROWAWAY keyring ($TEMP_GNUPGHOME) only — never the persistent one"
-KEY_PASSPHRASE="$(sed -n 's/^Passphrase:[[:space:]]*//p' "$SECRETS_DIR/PRIVATE_KEY_PASSPHRASE.txt")"
+KEY_PASSPHRASE="$(read_restore_passphrase)"
 
 REMOTE="b2:${B2_BUCKET}/${MODE}/${STAMP}/postgres-aion-runtime.dump.gpg"
 log_info "Downloading ${REMOTE} from offsite B2..."

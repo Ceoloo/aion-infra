@@ -12,6 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 umask 077
 CS="${1:?config-stamp}"; DS="${2:?db-stamp}"
+require_restore_key || exit 1
 C=aion-rehearsal-pg; PROD="${PG_CONTAINER:-aion-postgres-1}"
 D="$(mktemp -d -p "$STAGING_DIR")"; chmod 700 "$D"
 PASS=0; FAIL=0; ok() { PASS=$((PASS+1)); log_info "PASS: $*"; }; no() { FAIL=$((FAIL+1)); log_error "FAIL: $*"; }
@@ -19,8 +20,8 @@ OFFT="$(mktemp -d)"; chmod 700 "$OFFT"
 cleanup() { docker rm -f "$C" >/dev/null 2>&1; GNUPGHOME="$OFFT" gpgconf --kill gpg-agent >/dev/null 2>&1; find "$OFFT" "$D" -type f -exec shred -u {} \; 2>/dev/null; rm -rf "$OFFT" "$D"; unset OFFPW APPPW MIGPW; }
 trap cleanup EXIT
 echo "allow-loopback-pinentry" > "$OFFT/gpg-agent.conf"
-GNUPGHOME="$OFFT" gpg --batch --yes --import "$SECRETS_DIR/PRIVATE_KEY_SAVE_OFFSITE_THEN_DELETE.asc" >/dev/null 2>&1 || { log_error "offline key import failed"; exit 1; }
-OFFPW="$(sed -n 's/^Passphrase:[[:space:]]*//p' "$SECRETS_DIR/PRIVATE_KEY_PASSPHRASE.txt")"
+GNUPGHOME="$OFFT" gpg --batch --yes --import "$RESTORE_KEY_FILE" >/dev/null 2>&1 || { log_error "offline key import failed"; exit 1; }
+OFFPW="$(read_restore_passphrase)"
 dec() { echo "$OFFPW" | GNUPGHOME="$OFFT" gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$1" 2>/dev/null; }
 
 log_info "=== rehearsal: config-aion/$CS + db/$DS -> clean isolated Postgres ==="
