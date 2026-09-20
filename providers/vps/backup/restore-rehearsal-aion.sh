@@ -68,7 +68,7 @@ for pair in "aion_app:AION_APP_PASSWORD" "aion_migrator:AION_MIGRATOR_PASSWORD";
   role="${pair%%:*}"; var="${pair#*:}"; pw="$(printf '%s\n' "$ENVF" | sed -n "s/^${var}=//p" | head -1)"
   # Passfile (0600, inside the throwaway container, removed right after) instead of PGPASSWORD in a process environment.
   ok_login=0
-  if [ -n "$pw" ] && printf '%s:5432:aion_data:%s:%s\n' "$IP" "$role" "$pw" | docker exec -i "$C" sh -c 'umask 077; cat > /tmp/.rehearsal_pgpass' \
+  if [ -n "$pw" ] && printf '%s:5432:aion_data:%s:%s\n' "$IP" "$role" "$(printf '%s' "$pw" | sed -e 's/\\/\\\\/g' -e 's/:/\\:/g')" | docker exec -i "$C" sh -c 'umask 077; cat > /tmp/.rehearsal_pgpass' \
      && docker exec -e PGPASSFILE=/tmp/.rehearsal_pgpass "$C" psql -h "$IP" -U "$role" -d aion_data -w -tAc "SELECT 1" >/dev/null 2>&1; then ok_login=1; fi
   docker exec "$C" rm -f /tmp/.rehearsal_pgpass >/dev/null 2>&1
   if [ "$ok_login" = 1 ]; then ok "$role logs in over TCP (scram) with the password from the archived .env"; else no "$role could NOT log in with the archived .env password"; fi

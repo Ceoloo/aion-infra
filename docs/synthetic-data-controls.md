@@ -24,8 +24,8 @@ designed but not built (needs an aion-data migration + runtime change).
   `metadata.cohort`), because `mission_record` defaults every mission without a `mission_context` row to `'OL-001'`.
 
 ## The reconciled SQL — `providers/vps/sql/ol-metrics-reconciled.sql` (+ `-rollback.sql`)
-1. `ol_metrics.mission_classification` table (`production|validation|synthetic|unverified`, reason, classified_by,
-   classified_at) seeded with all 10 existing missions. `aion_app` gets **SELECT only** — the schema's default privileges
+1. `ol_metrics.mission_classification` table (`production|validation|synthetic`, reason, classified_by,
+   classified_at) seeded with the 7 Console-flagged missions (the 3 unflagged stay unclassified). `aion_app` gets **SELECT only** — the schema's default privileges
    auto-grant `arw`, so the SQL `REVOKE`s them (found by testing; without it the runtime role could rewrite classification).
 2. `mission_record`: cohort from the mission's own `metadata.cohort`, no silent `'OL-001'` default. Columns unchanged.
 3. `cohort_kpis`: only `production`-classified missions. Columns unchanged.
@@ -33,12 +33,12 @@ designed but not built (needs an aion-data migration + runtime change).
    `counts_as_business_value`; sum business value **only** over `WHERE counts_as_business_value`.
 5. `unclassified_missions` (new view): nothing silently drops out — missions awaiting a decision are listed.
 
-### The eight missions excluded from KPIs, with reasons
+### Missions excluded from KPIs, with reasons (see `kpi-decision-package.md` for the corrected evidence on the three unflagged ones — they stay UNCLASSIFIED, not seeded)
 | Mission | Class | Reason (from the data) |
 |---|---|---|
-| `msn_c5409a36…` | unverified | Tagged cohort OL-001, no `productionEconomic`/`synthetic` flags; created 2026-09-07 06:13 during runtime bring-up, before the Console set flags |
-| `OL-001-M001` | unverified | Hand-seeded OL-001 mission (`mission_context` row, `realized_revenue` NULL, 2026-09-07); no flags; ordinal predates the Console's `missionOrdinal` (whose #1 is `msn_0e3c5c21…`) — likely superseded |
-| `msn_d9aa3dac…` | unverified | Tagged cohort OL-001, no flags; created 2026-09-07 17:23 during bring-up |
+| `msn_c5409a36…` | *unclassified* | No flags; template/naming say OL-001 production, but ran before the Console flags and on the fake CRM backend; owner decides |
+| `OL-001-M001` | *unclassified* | Hand-seeded, self-labelled real lead, no execution effect; owner decides |
+| `msn_d9aa3dac…` | *unclassified* | Same as `msn_c5409a36…` |
 | `msn_9eedcb95…` | validation | `pre_ol_validation`; Console flags `productionEconomic=false` (2026-09-08) |
 | `msn_db405716…` | validation | same |
 | `msn_30fd4f95…` | validation | same; one execution still awaiting approval |
@@ -47,16 +47,16 @@ designed but not built (needs an aion-data migration + runtime change).
 
 **Included (2):** `msn_648d3df8…` (Console-launched OL-001, `productionEconomic=true`, 13 executions, several failed) and
 `msn_0e3c5c21…` (`launchMode=ol001_production`, ordinal 1, one R2 approval pending). Both are included *because the
-Console flagged them*, not because anyone verified them — owner to confirm. If any of the three `unverified` are real
-leads, reclassify (`UPDATE ol_metrics.mission_classification …`, owner role).
+Console flagged them*, not because anyone verified them — owner to confirm. The three unflagged missions are left unclassified;
+to classify any, use `ol_metrics.classify_mission(…)` (owner role; audited).
 
 ### Test evidence (production copy with real ownership/ACLs; production untouched)
-- After apply: `cohort_kpis` 10 → **2** missions; `mission_record` 5 `OL-001` + 5 `pre_ol_validation`; 8 classified
-  rows listed above; `unclassified_missions` 0 rows; base-table content checksums unchanged (only the new table's rows
+- After apply: `cohort_kpis` 10 → **2** missions; `mission_record` 5 `OL-001` + 5 `pre_ol_validation`; 7 classified
+  rows (2 production, 5 validation); `unclassified_missions` 3 rows (the unflagged missions; earlier revision seeded them as `unverified` — superseded); base-table content checksums unchanged (only the new table's rows
   and schema hash differ).
-- `aion_app`: `permission denied` on UPDATE/INSERT of classification; can SELECT (10 rows).
+- `aion_app`: `permission denied` on UPDATE/INSERT of classification; can SELECT (7 rows).
 - Ledger with injected test rows (rolled back): production-classified mission 250 + 500 counted; validation 999 + 900 and
-  unverified 700 excluded (750 counted vs 2,599 excluded).
+  unclassified 700 excluded (750 counted vs 2,599 excluded).
 - A **new** mission whose metadata says `productionEconomic=true, synthetic=false` appears in `unclassified_missions` and
   **not** in the KPIs until classified.
 - The real fake-backend proof's records (3 rows, 4,500 total) → `data_class=unclassified`, `counts=false` — and still
@@ -64,7 +64,7 @@ leads, reclassify (`UPDATE ol_metrics.mission_classification …`, owner role).
   tenant naming or on mission creation.
 - Rollback: `pg_get_viewdef` md5 of both views **identical to the live baseline** (not merely the dump-derived one),
   outputs and pre-existing ACLs identical, the two added views dropped, classification table **kept as evidence**.
-- Not idempotent by design (the table already exists on a second apply); apply once.
+- Re-applicable (IF NOT EXISTS / OR REPLACE / ON CONFLICT DO NOTHING); rollback → re-apply sequence tested.
 
 **Operational consequence to approve:** after apply, a *new* production mission does not count in KPIs until someone
 classifies it. That is the fail-closed choice; `unclassified_missions` is the to-do list.

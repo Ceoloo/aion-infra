@@ -46,7 +46,7 @@ and that actor to exist in `actors` as a **human** (or be supplied in the reques
 | `principal_revenue_copilot` | service | `act_service_revenue_copilot` | invoke | no (not an approver) |
 Registered human actors: `operator-console` and four proof approvers from 2026-09-08 (`act_a051…`, `act_8787…`, `act_a9bf…`, `act_e4d1…`). The Console's approval button sends `decidedBy=operator-console` (`VITE_AION_OPERATOR_ID` overrides).
 
-**Method:** the runtime (PR #46 build) was run on a **scratch restore of production** (isolated container, `staging`, no CRM credentials) with the production principal configuration and real tokens (never printed).
+**Method:** the runtime (PR #46 build; the fix is aion-runtime PR #48) was run on a **scratch restore of production** (isolated container, `staging`, no CRM credentials) with the production principal configuration and real tokens (never printed).
 Every request below was made against that copy; production received none.
 
 | # | Request | Result |

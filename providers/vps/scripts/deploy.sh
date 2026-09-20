@@ -39,6 +39,10 @@ if [ -n "${DEPLOY_IMAGE:-}" ]; then
   echo "[deploy] .env updated from CI: AION_IMAGE=${DEPLOY_IMAGE} GIT_SHA=${DEPLOY_GIT_SHA:-<unchanged>}"
 fi
 
+# .env is the single source of truth: drop any same-named variable the caller exported (Compose gives the shell environment
+# precedence over .env, so an inherited AION_GATEWAY_API_KEYS/AION_IMAGE/... would silently win for validation and every compose call).
+while IFS= read -r _k; do unset "${_k}" 2>/dev/null || true; done < <(grep -oE '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' .env | sed -E 's/^[[:space:]]*(export[[:space:]]+)?//; s/=$//')
+
 # Preflight FIRST: every ${VAR:?...} required var + JSON-shaped vars (see
 # scripts/validate-env.sh — the fix for the 2026-09-14 incident, aion-infra#12/#13).
 # It uses Compose's own parser, so it must run before anything shell-parses .env.

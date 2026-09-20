@@ -1,17 +1,18 @@
 -- RECONCILED KPI / PROVENANCE CHANGE — PROPOSED, NOT APPLIED to production (needs owner approval).
 -- Purpose: business-value reporting counts a record ONLY if it belongs to a mission that a person explicitly classified
--- 'production'. Everything else — validation runs, unverified early missions, synthetic proofs, any future record — is
+-- 'production'. Everything else — validation runs, uncertain early missions (left unclassified), synthetic proofs, any future record — is
 -- excluded BY DEFAULT, independent of naming, tenant id, metadata flags, or whether a mission row exists.
 -- Nothing is deleted or altered in executions/approvals/outcomes/missions; history is preserved. The two existing views
 -- keep their column lists (CREATE OR REPLACE). Rollback: ol-metrics-reconciled-rollback.sql (keeps the classification
--- table as evidence). Run as a superuser or aion_migrator via: psql -v ON_ERROR_STOP=1 -f <this file>  (the file has its own BEGIN/COMMIT)
+-- table as evidence). Run as a superuser or aion_migrator via: psql -v ON_ERROR_STOP=1 -f <this file>  — safe to re-apply (IF NOT EXISTS / OR REPLACE / ON CONFLICT DO NOTHING)  (the file has its own BEGIN/COMMIT)
 BEGIN;
 SET LOCAL ROLE aion_migrator;   -- objects stay owned by the schema owner, like every existing ol_metrics object
 
--- 1. Explicit, auditable classification. Default for any mission NOT listed here = excluded.
-CREATE TABLE ol_metrics.mission_classification (
+-- 1. Explicit, auditable classification. Default for any mission NOT listed here = excluded AND listed in unclassified_missions.
+--    Missions whose nature is uncertain are deliberately NOT seeded: they stay unclassified (excluded, visible) until a person decides.
+CREATE TABLE IF NOT EXISTS ol_metrics.mission_classification (
   mission_id    text PRIMARY KEY REFERENCES public.missions(mission_id),
-  data_class    text NOT NULL CHECK (data_class IN ('production','validation','synthetic','unverified')),
+  data_class    text NOT NULL CHECK (data_class IN ('production','validation','synthetic')),
   reason        text NOT NULL CHECK (length(reason) > 0),
   classified_by text NOT NULL,
   classified_at timestamptz NOT NULL DEFAULT now()
@@ -24,7 +25,7 @@ GRANT SELECT ON ol_metrics.mission_classification TO aion_app;
 -- 1b. Append-only audit of every classification change (insert/update/delete), written by a trigger so no writer can skip it.
 --     Records the DATABASE role that connected (session_user — cannot be spoofed by the row), the role in force, the claimed
 --     human (row.classified_by — asserted, not authenticated: everyone uses a shared DB login today), before/after values.
-CREATE TABLE ol_metrics.mission_classification_audit (
+CREATE TABLE IF NOT EXISTS ol_metrics.mission_classification_audit (
   audit_id     bigserial PRIMARY KEY,
   changed_at   timestamptz NOT NULL DEFAULT clock_timestamp(),
   operation    text NOT NULL CHECK (operation IN ('INSERT','UPDATE','DELETE')),
@@ -38,7 +39,7 @@ CREATE TABLE ol_metrics.mission_classification_audit (
 );
 REVOKE ALL ON ol_metrics.mission_classification_audit FROM aion_app;
 GRANT SELECT ON ol_metrics.mission_classification_audit TO aion_app;
-CREATE FUNCTION ol_metrics.audit_mission_classification() RETURNS trigger LANGUAGE plpgsql AS $f$
+CREATE OR REPLACE FUNCTION ol_metrics.audit_mission_classification() RETURNS trigger LANGUAGE plpgsql AS $f$
 BEGIN
   IF TG_OP = 'INSERT' THEN
     INSERT INTO ol_metrics.mission_classification_audit(operation, mission_id, new_class, new_reason, claimed_by)
@@ -52,17 +53,20 @@ BEGIN
   END IF;
   RETURN NULL;
 END $f$;
+DROP TRIGGER IF EXISTS mission_classification_audit_trg ON ol_metrics.mission_classification;
 CREATE TRIGGER mission_classification_audit_trg AFTER INSERT OR UPDATE OR DELETE ON ol_metrics.mission_classification
   FOR EACH ROW EXECUTE FUNCTION ol_metrics.audit_mission_classification();
-CREATE FUNCTION ol_metrics.audit_is_append_only() RETURNS trigger LANGUAGE plpgsql AS $f$
+CREATE OR REPLACE FUNCTION ol_metrics.audit_is_append_only() RETURNS trigger LANGUAGE plpgsql AS $f$
 BEGIN RAISE EXCEPTION 'mission_classification_audit is append-only'; END $f$;
+DROP TRIGGER IF EXISTS mission_classification_audit_ro ON ol_metrics.mission_classification_audit;
 CREATE TRIGGER mission_classification_audit_ro BEFORE UPDATE OR DELETE ON ol_metrics.mission_classification_audit
   FOR EACH ROW EXECUTE FUNCTION ol_metrics.audit_is_append_only();
+DROP TRIGGER IF EXISTS mission_classification_audit_ro_trunc ON ol_metrics.mission_classification_audit;
 CREATE TRIGGER mission_classification_audit_ro_trunc BEFORE TRUNCATE ON ol_metrics.mission_classification_audit
   FOR EACH STATEMENT EXECUTE FUNCTION ol_metrics.audit_is_append_only();
 
 -- 1c. The one supported way to classify: requires a non-empty reason and the name of the deciding person.
-CREATE FUNCTION ol_metrics.classify_mission(p_mission_id text, p_class text, p_reason text, p_decided_by text) RETURNS void
+CREATE OR REPLACE FUNCTION ol_metrics.classify_mission(p_mission_id text, p_class text, p_reason text, p_decided_by text) RETURNS void
 LANGUAGE plpgsql AS $f$
 BEGIN
   IF coalesce(length(btrim(p_reason)),0) < 10 THEN RAISE EXCEPTION 'reason must be at least 10 characters'; END IF;
@@ -74,7 +78,7 @@ BEGIN
 END $f$;
 REVOKE ALL ON FUNCTION ol_metrics.classify_mission(text,text,text,text) FROM PUBLIC;   -- owner/superuser only; aion_app cannot execute it
 
-INSERT INTO ol_metrics.mission_classification (mission_id, data_class, reason, classified_by) SELECT v.mission_id, v.data_class, v.reason, 'audit-2026-09-20 (owner approval at apply)'
+INSERT INTO ol_metrics.mission_classification (mission_id, data_class, reason, classified_by) SELECT v.mission_id, v.data_class, v.reason, 'PROPOSED by audit 2026-09-20 from Console flags (asserted, not an authenticated person)'
 FROM (VALUES
   ('msn_648d3df8-43f7-422f-b457-4f0bb63291f3','production','Console-launched OL-001 mission flagged productionEconomic=true, synthetic=false (2026-09-11). 13 executions, several failed. Owner to confirm it is a real lead attempt.'),
   ('msn_0e3c5c21-6bd4-4858-9232-032a399932d9','production','Console-launched OL-001 mission, launchMode=ol001_production, missionOrdinal 1, productionEconomic=true, synthetic=false (2026-09-12). One R2 approval still pending.'),
@@ -82,11 +86,9 @@ FROM (VALUES
   ('msn_db405716-0b9d-4823-8dc3-565c8e4689dd','validation','pre_ol_validation cohort; Console flags productionEconomic=false (2026-09-08 pre-launch validation run).'),
   ('msn_30fd4f95-6e33-4a6f-aab4-6524cdbf44ad','validation','pre_ol_validation cohort; Console flags productionEconomic=false (2026-09-08); one execution still awaiting approval.'),
   ('msn_eeb22b82-79cc-4f76-89f2-f430798b6a3c','validation','pre_ol_validation cohort; Console flags productionEconomic=false (2026-09-08 pre-launch validation run).'),
-  ('msn_59c5efb6-d9eb-47ab-a70d-15607728f002','validation','pre_ol_validation cohort; Console flags productionEconomic=false (2026-09-08); one execution still awaiting approval.'),
-  ('msn_c5409a36-1e16-48a8-af21-4d5b107cc863','unverified','Cohort OL-001 tag only; no productionEconomic/synthetic flags; created 2026-09-07 06:13 during runtime bring-up. Evidence: 3 succeeded R1 executions, no approvals, no outcomes, no revenue; ONE real CRM contact update (crm.contact.update@1) reached the CRM on a contact linked to no Console mission or approval. Owner decides: bring-up test (validation) or real customer work (production).'),
-  ('OL-001-M001','unverified','Hand-seeded OL-001 mission (mission_context row created 2026-09-07 06:22; workflow QUALIFY>INTERACT>FOLLOW_UP>OPPORTUNITY; lead_source self-labelled REAL_LEAD but no opportunity value and no realized revenue). Evidence: one succeeded R1 execution, no approval, no outcome, no CRM side effect recorded. Ordinal naming predates the Console missionOrdinal. Owner decides: real lead (production) or bring-up seed (validation).'),
-  ('msn_d9aa3dac-5655-478f-a600-be018d9d2b2c','unverified','Cohort OL-001 tag only; no productionEconomic/synthetic flags; created 2026-09-07 17:23 during runtime bring-up. Evidence: 3 succeeded R1 executions, no approvals, no outcomes, no revenue; ONE real CRM contact update (crm.contact.update@1) reached the CRM on a contact linked to no Console mission or approval. Owner decides: bring-up test (validation) or real customer work (production).')
-) AS v(mission_id, data_class, reason);
+  ('msn_59c5efb6-d9eb-47ab-a70d-15607728f002','validation','pre_ol_validation cohort; Console flags productionEconomic=false (2026-09-08); one execution still awaiting approval.')
+) AS v(mission_id, data_class, reason)
+ON CONFLICT (mission_id) DO NOTHING;   -- re-apply after a rollback keeps any decision already recorded
 
 -- 2. mission_record: cohort comes from the mission's own metadata, no silent default to 'OL-001'.
 CREATE OR REPLACE VIEW ol_metrics.mission_record AS
@@ -210,7 +212,7 @@ CREATE OR REPLACE VIEW ol_metrics.cohort_kpis AS
 -- 4. Record-level ledger so value rows are judged on provenance, not on whether a mission was created.
 --    Sum business value ONLY over: SELECT ... FROM ol_metrics.business_value_ledger WHERE counts_as_business_value.
 --    (revenue_attributed rows are attribution, not realized revenue; filter status/outcome_type as needed.)
-CREATE VIEW ol_metrics.business_value_ledger AS
+CREATE OR REPLACE VIEW ol_metrics.business_value_ledger AS
 SELECT u.source, u.record_id, u.run_id, u.mission_id, u.tenant_id, u.status, u.outcome_type, u.amount, u.currency,
        COALESCE(c.data_class, 'unclassified') AS data_class,
        COALESCE(c.data_class = 'production', false) AS counts_as_business_value
@@ -228,7 +230,7 @@ REVOKE ALL ON ol_metrics.business_value_ledger FROM aion_app;
 GRANT SELECT ON ol_metrics.business_value_ledger TO aion_app;
 
 -- 5. Visibility: nothing silently drops out of reporting — unclassified missions are listed for an owner to classify.
-CREATE VIEW ol_metrics.unclassified_missions AS
+CREATE OR REPLACE VIEW ol_metrics.unclassified_missions AS
 SELECT m.mission_id, m.created_at, m.status, m.metadata ->> 'cohort' AS cohort_hint,
        m.metadata ->> 'productionEconomic' AS console_production_flag, m.metadata ->> 'synthetic' AS console_synthetic_flag
 FROM public.missions m LEFT JOIN ol_metrics.mission_classification c USING (mission_id) WHERE c.mission_id IS NULL;
@@ -236,10 +238,9 @@ REVOKE ALL ON ol_metrics.unclassified_missions FROM aion_app;
 GRANT SELECT ON ol_metrics.unclassified_missions TO aion_app;
 
 -- 6. One-row health indicator for monitoring/dashboards: how many missions await classification, how old, when last changed.
-CREATE VIEW ol_metrics.classification_health AS
+CREATE OR REPLACE VIEW ol_metrics.classification_health AS
 SELECT (SELECT count(*) FROM ol_metrics.unclassified_missions)                    AS unclassified_count,
        (SELECT min(created_at) FROM ol_metrics.unclassified_missions)             AS oldest_unclassified_created_at,
-       (SELECT count(*) FROM ol_metrics.mission_classification WHERE data_class = 'unverified') AS unverified_count,
        (SELECT max(changed_at) FROM ol_metrics.mission_classification_audit)      AS last_classification_change_at;
 REVOKE ALL ON ol_metrics.classification_health FROM aion_app;
 GRANT SELECT ON ol_metrics.classification_health TO aion_app;

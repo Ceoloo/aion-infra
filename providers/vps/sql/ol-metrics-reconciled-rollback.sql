@@ -122,6 +122,7 @@ CREATE OR REPLACE VIEW ol_metrics.cohort_kpis AS
     round((sum(human_minutes) / NULLIF((sum(economic_value) / 1000.0), (0)::numeric)), 2) AS human_minutes_per_1k_ev
    FROM ol_metrics.mission_record
   GROUP BY cohort;
+-- Re-applying the forward script after this rollback is supported (it reuses the kept objects and never overwrites a recorded decision).
 -- The audit table + triggers are kept too (evidence; the audit table is append-only). To remove everything by hand:
 -- DROP TABLE ol_metrics.mission_classification_audit; DROP TABLE ol_metrics.mission_classification;
 -- DROP FUNCTION ol_metrics.audit_mission_classification(); DROP FUNCTION ol_metrics.audit_is_append_only();
