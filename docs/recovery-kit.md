@@ -75,4 +75,6 @@ Steps marked ✅ were rehearsed; ⬜ are documented but **untested**.
 4. Hostinger login (VPS, snapshots) and the DNS provider for the runtime hostname.
 5. Provider consoles to regenerate the GHL token, OpenRouter key and gateway tokens if `.env` is lost.
 
+Step-by-step, with a public-value proof you can run yourself: `docs/offhost-key-custody.md`.
+
 **I will not mark full-host recovery covered until you confirm item 1.**

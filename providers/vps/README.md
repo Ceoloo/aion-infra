@@ -72,6 +72,7 @@ providers/vps/
     ├── validate-env.sh              preflight: required + JSON-shaped .env vars
     ├── monitor-runtime.sh           failure detection (container + external health)
     ├── report-stale-approvals.sh    read-only: aged pending/awaiting_approval rows
+    ├── report-unclassified-missions.sh  read-only: missions awaiting KPI classification (needs the reconciliation SQL)
     ├── backup.sh
     └── restore.sh
 ```

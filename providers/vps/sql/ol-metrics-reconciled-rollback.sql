@@ -4,7 +4,9 @@
 -- the commented DROP by hand.
 BEGIN;
 SET LOCAL ROLE aion_migrator;
+DROP VIEW IF EXISTS ol_metrics.classification_health;
 DROP VIEW IF EXISTS ol_metrics.unclassified_missions;
+DROP FUNCTION IF EXISTS ol_metrics.classify_mission(text,text,text,text);
 DROP VIEW IF EXISTS ol_metrics.business_value_ledger;
 CREATE OR REPLACE VIEW ol_metrics.mission_record AS
  WITH ex AS (
@@ -120,5 +122,8 @@ CREATE OR REPLACE VIEW ol_metrics.cohort_kpis AS
     round((sum(human_minutes) / NULLIF((sum(economic_value) / 1000.0), (0)::numeric)), 2) AS human_minutes_per_1k_ev
    FROM ol_metrics.mission_record
   GROUP BY cohort;
--- DROP TABLE ol_metrics.mission_classification;   -- only if you also want the classification evidence gone
+-- The audit table + triggers are kept too (evidence; the audit table is append-only). To remove everything by hand:
+-- DROP TABLE ol_metrics.mission_classification_audit; DROP TABLE ol_metrics.mission_classification;
+-- DROP FUNCTION ol_metrics.audit_mission_classification(); DROP FUNCTION ol_metrics.audit_is_append_only();
+-- (old line) DROP TABLE ol_metrics.mission_classification;   -- only if you also want the classification evidence gone
 COMMIT;

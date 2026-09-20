@@ -8,7 +8,7 @@ review-thread disposition, secret/identifier check, CI, and merge notes.
 |---|---|---|
 | `providers/vps/scripts/{monitor-runtime,validate-env,deploy}.sh` | `/opt/aion/scripts/` | identical |
 | `providers/vps/scripts/{backup,restore,bootstrap-server}.sh` (from `main`) | `/opt/aion/scripts/` | identical to `main` |
-| `providers/vps/scripts/report-stale-approvals.sh` | — | **not installed** (run from the repo clone when needed) |
+| `providers/vps/scripts/report-stale-approvals.sh`, `report-unclassified-missions.sh` | — | **not installed** (run from the repo clone when needed) |
 | `providers/vps/backup/*.sh` (7 files) | `/opt/aion-backup/bin/` | identical |
 | `providers/vps/system/aion-{monitor,backup-runtime-db,backup-config}.{service,timer}`, `aion-backup-alert@.service` | `/etc/systemd/system/` | identical; monitor + runtime-db + config timers **enabled** |
 | `providers/vps/system/aion-backup.{service,timer}` | — | **not installed, not enabled** (legacy S3 path; see below) |
@@ -31,6 +31,10 @@ it needs your go-ahead. Until then, "installed == tracked" holds only for the pr
 | Compose backups `/opt/aion/docker-compose.yml.bak.*` | rollback copies | the `pre-limits` copy is the rollback for the resource rollout |
 | `/root/aion-rollout-20260920/` (evidence, clones) | working area | disposable after this pass |
 | B2 bucket contents; ntfy topic | external | see `recovery-kit.md` |
+
+## 2b. Also in this PR since the first review pass (docs/SQL only — nothing installed or applied)
+`docs/kpi-decision-package.md`, `docs/stale-approval-disposition.md` (rewritten: per-approval review + production authorization-path finding), `docs/aion-runtime-pr46-merge-readiness.md`,
+`docs/offhost-key-custody.md`; `sql/ol-metrics-reconciled{,-rollback}.sql` extended (audit trail, `classify_mission`, `classification_health`) and re-tested on a scratch restore — **still unapplied**.
 
 ## 3. Review threads (12; all were unresolved) — disposition
 | # | Reviewer | Where | Finding | Disposition |
