@@ -134,6 +134,38 @@ validate, then cut over deliberately. See [backup-recovery.md](backup-recovery.m
    output.
 3. Fix forward and re-deploy, or **Rollback runtime** to the last good SHA.
 
+## Handle a runtime crash-loop after editing `.env` (VPS)
+
+If `aion-runtime` restarts repeatedly with `config_invalid` in its logs:
+
+1. Diagnose without printing secrets — compare lengths/JSON-validity, not
+   values:
+   ```bash
+   cd /opt/aion
+   docker compose config --format json | python3 -c \
+     "import json,sys; v=json.load(sys.stdin)['services']['aion-runtime']['environment'].get('AION_GATEWAY_API_KEYS',''); print(len(v)); json.loads(v)"
+   ```
+   If this parses cleanly but the container is still crash-looping, the
+   **container's frozen creation-time env is stale** — `.env` was fixed
+   after the container was created, but the container was never recreated
+   to pick it up. Confirm via
+   `docker inspect aion-aion-runtime-1 --format '{{.Created}}'` vs
+   `stat -c %y .env`.
+2. Fix: `docker compose up -d aion-runtime` (recreates only this
+   container from the current `.env`; no image change, no migration).
+   Prefer `sudo -E ./scripts/deploy.sh` when also rolling an image, since
+   it health-gates and auto-rolls-back — a bare `docker compose up` does
+   not.
+3. Validate: `docker inspect --format '{{.State.Health.Status}}'` reaches
+   `healthy`; `curl $AION_RUNTIME_URL/health/ready` returns 200; restart
+   count stops climbing.
+4. This class of bug (edit `.env` → forget to redeploy) is why any PR that
+   adds/changes a required env var (e.g. the 2026-09-14 "Track A" PR that
+   added `AION_GATEWAY_API_KEYS`) must end with an actual redeploy step
+   confirmed on the box, not just a corrected file. Consider adding
+   container-restart-count alerting so a repeat doesn't run silently for
+   days — see `docs/audit-2026-09-20-vps-execution-readiness.md`.
+
 ## Human database access (break-glass)
 
 Exceptional only (§38). Prefer read-only, authenticated, logged:
