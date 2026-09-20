@@ -43,43 +43,82 @@ either trace it via `aion-runtime`'s own test/CI logs from that date, or
 treat the milestone as needing a clean re-run (below) and stop trying to
 retroactively validate the old one.
 
-## Re-running the revenue proof against canonical storage
+## Revenue proof re-run — DONE, and the $1,500/4-units/3-gates mystery is solved
 
-Plan (not executed this session — would create real rows in production
-`aion_data`, which needs the same care as any other production write):
+**Executed against an isolated database, not production** — per the
+original mission's own Phase 5 wording ("first run... in an isolated
+environment"), not the live `aion_data`. Deliberately not run against
+production this session: it starts its own separate host-process Runtime
+instance (not the containerized production one) and there was no reason to
+risk writing into the canonical store when the isolated run already
+answers the open question conclusively (below).
 
-1. Identify the exact mission/workflow the original proof used (check
-   `aion-runtime`'s test suite / CI artifacts for the run that produced the
-   "$1,500" figure — this determines whether it's re-runnable as-is or
-   needs updating for schema drift since then).
-2. Run it against `aion_data` via the **same path a real caller would use**
-   (the `/v1/...` HTTP surface through the Execution Gateway, not a direct
-   DB write) so the proof actually exercises approval gates, not just
-   schema inserts.
-3. After it completes, verify placement, not just "no error":
-   ```sql
-   SELECT outcome_id, run_id, status, outcome_type, value, currency
-   FROM outcomes WHERE run_id = '<the run>';
-   SELECT execution_id, revenue_attributed, cost
-   FROM executions WHERE run_id = '<the run>';
-   ```
-   A real pass means `outcomes` gets a `status='realized'` row with a
-   `value`/`currency`, AND/OR `executions.revenue_attributed` is non-NULL
-   for the relevant execution — not just "the script exited 0".
-4. Tag every row this produces (e.g. a `metadata.label` or a dedicated
-   `source_system` value) so it is unambiguously identifiable and
-   removable — same discipline as the P8F synthetic-canary convention
-   already used elsewhere in AION (tag, verify, clean up, reconfirm zero
-   residue).
-5. Report the result as exactly what it is: a **synthetic proof result**
-   with real persistence, not realized business revenue. Per this mission's
-   own instruction — do not describe $1,500 (old or re-run) as realized
-   revenue without actual business evidence (a real GHL opportunity, a real
-   payment, something external to AION's own database) backing it.
+**Found the actual source of the script:** `aion-runtime`'s `main`
+(cloned at `6eb2b79`, three commits ahead of the currently-deployed
+`eb36cfb6`) has `scripts/revenue-workflow-durable-proof.sh` /
+`npm run proof:revenue-workflow` — a self-contained Lead→Opportunity→
+Note/Task→3×R2-gate→restart→outcome proof, using `FakeGhlBackend` (no real
+GHL calls) whenever `GHL_*` env vars are unset.
 
-**Status: plan only. Not run.** Needs the mission/workflow identification
-step (1) before it can proceed, and should go through the same review as
-any other production-writing action.
+**Setup:** vendored `@aion/core`+`@aion/data` (`node scripts/setup-deps.mjs`),
+`npm ci`, isolated disposable `postgres:16-alpine` (roles `aion_migrator`/
+`aion_app`, matching `providers/vps/system/init-roles.sh`), ran
+`npm run proof:revenue-workflow` against it.
+
+**Result: PASS A–J, green, exactly reproducing the reported milestone —
+and proving it's a fixture, not a measurement:**
+```
+[PASS D] stage update parked approvalId=apr_724657ce... (handoff written)
+[proof-rw] restart Runtime (PASS E)
+[PASS E] restart preserved approval; stage executed
+[PASS G] Outcome realized outcomeId=out_f4ace91d... value=1500 USD
+[PASS H] cost units=4; attributed=1500; scopeCost=4
+[TELEMETRY] Did a human intervene?     YES (3 gates)
+[TELEMETRY] What business value?       1500 USD (attributed EV 1500)
+```
+Verified in the isolated database afterward (not just trusting stdout):
+```sql
+SELECT outcome_id, status, outcome_type, value, currency FROM outcomes;
+-- out_f4ace91d...: realized | revenue_qualified | 1500 | USD  ✅
+SELECT execution_id, revenue_attributed FROM executions WHERE revenue_attributed IS NOT NULL;
+-- 2 rows, both revenue_attributed = 1500  ✅
+SELECT approval_id, status, risk_level, reason FROM approvals;
+-- 3 rows, all risk_level='R2', all status='granted':
+--   crm.contact.update, crm.opportunity.create, crm.opportunity.update  ✅ (the "3 R2 gates")
+```
+
+**Conclusion, now evidence-backed rather than circumstantial:**
+1. **The pipeline mechanics are real** — when run correctly, this exact
+   workflow DOES produce a `status='realized'` `outcomes` row with a
+   populated `value`/`currency`, AND `executions.revenue_attributed`
+   populated. The schema/persistence design is not the gap.
+2. **The "$1,500 / 4 cost units / 3 R2 gates" figures are a deterministic
+   fixture built into the proof script itself** (`FakeGhlBackend`), not a
+   measurement of any real business transaction — this run reproduced the
+   identical numbers on demand, confirming they're scripted, not observed.
+3. **The original milestone almost certainly ran in an ephemeral/local
+   database like this one, not the persistent production `aion_data`** —
+   this is now the most likely explanation for why `outcomes` has zero
+   rows and `revenue_attributed` is NULL everywhere in production: the
+   proof was never run *against* production in the first place, not that
+   it ran there and the result went missing.
+4. The 3 approvals found stale in production (`apr_c7e02e9f...`,
+   `apr_46feebb7...`, `apr_63a095b9...` — see below) are a **separate,
+   real, unrelated finding** — those are genuine `pre_ol_validation`/
+   `OL-001` mission approvals sitting unresolved in production, not
+   remnants of this fixture-based proof (this proof's approval IDs are
+   freshly generated each run and never touch production).
+
+**Cleanup:** the isolated Postgres container was removed immediately after
+capture. Confirmed zero residue in production — `aion-postgres-1`
+`StartedAt` unchanged throughout, `SELECT count(*) FROM outcomes` on
+production still returns 0.
+
+**Not done this session:** running this same proof with `GHL_*` set against
+an authorized test tenant (would exercise the real GHL adapter instead of
+`FakeGhlBackend` — a materially different, higher-value proof, but a
+separate scoped action with its own credential/tenant authorization, not
+assumed here).
 
 ## Stale approvals — found, not touched
 
@@ -93,14 +132,42 @@ production this session) confirms 3 rows, all `risk_level='R2'`:
 | `apr_63a095b9-b175-4089-8647-c95e9e28c2e1` | `msn_0e3c5c21-6bd4-4858-9232-032a399932d9` | 2026-09-12 01:12:50 | ~197h |
 
 Each has a matching `executions` row stuck `status='awaiting_approval'`.
-**Per this mission's instruction, none were approved, rejected, or
-replayed.** The mission owner should review each `command_snapshot` (not
-done here — that requires business judgment this session doesn't have) and
-resolve via the `UPDATE approvals ...` pattern in the runbook. No timeout/
-escalation mechanism exists yet for approvals that age out — a real P1/P2,
-not designed or implemented this session (would need product input: what
-should happen to an R2 action nobody approved in N days — auto-expire?
-escalate to whom? — that's a policy decision, not an infra one).
+**None were approved, rejected, or replayed.** Sanitized summary of each
+`command_snapshot` (real business identifiers shown — this is your own
+system's data, not a secret; no credentials/tokens are present in any of
+the three):
+
+**1–2. `apr_c7e02e9f...` and `apr_46feebb7...`** (2026-09-08, ~5 min apart)
+— capability `crm.opportunity.create`, actor cohort `pre_ol_validation`,
+`productionEconomic: false`. Both create a generically-named GHL
+opportunity (`"L2A opportunity <timestamp>"`, no real contact/client
+attached in the payload) as part of the `lead-to-appointment-v1` workflow
+template, from the Operator Console. Read as **pre-launch validation
+runs** — smoke-testing the workflow before the real OL-001 cohort, not
+real customer actions. **Assessment: very likely stale/superseded** — if
+OL-001 has since progressed (it has: approval #3 below is `missionOrdinal:
+1` of a `cohortTarget: 100`), whatever these were validating already
+happened. Recommend the mission owner reject/expire both rather than
+approve, but confirm before acting — this is a judgment call, not
+inferred with certainty.
+
+**3. `apr_63a095b9...`** (2026-09-12) — capability `crm.opportunity.update`,
+actor cohort `OL-001`, **`productionEconomic: true`**, `missionOrdinal: 1`
+of `cohortTarget: 100`. Would update a real GHL opportunity
+(`opportunityId: rGbIyrAvGDcmMEzjBER4`, contact "Annfiera McPherson",
+client "ModernRelx") to `stage: fdd0844f...`, `status: open`, `value: 500`.
+**Notable: this is the same GHL opportunity ID used as the test target in
+the 2026-09-08 GHL live acceptance gate** (see
+[[project-aion-ghl-live-crm]]) — its real current state in GHL may no
+longer match what this 8+ day old snapshot assumes. **Assessment: do not
+approve on the strength of this snapshot alone** — the mission owner
+should check the opportunity's actual current state in GHL directly before
+deciding whether this update is still correct, redundant, or now wrong.
+
+No timeout/escalation mechanism exists yet for approvals that age out — a
+real P1/P2, not designed or implemented this session (needs a policy
+decision — auto-expire after N days? escalate to whom? — not an infra
+question).
 
 ## Resource limits + bounded logging — prepared, validated, NOT applied
 
