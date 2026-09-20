@@ -85,7 +85,7 @@ if [ -s "$DEC" ]; then
     if docker exec restore-test-aion-runtime-pg pg_restore -U postgres -d aion_data --no-owner --no-acl /tmp/restore.dump >>"$LOG_FILE" 2>&1; then
         pass "pg_restore completed cleanly into an isolated container"
     else
-        log_warn "pg_restore reported some errors (see $LOG_FILE — often benign role/owner diffs restoring into a vanilla postgres:16)"
+        fail "pg_restore returned errors — a partial restore is not certified as restorable (see $LOG_FILE)"
     fi
 
     # Schema check — the 7 canonical tables the durable-execution contract requires.

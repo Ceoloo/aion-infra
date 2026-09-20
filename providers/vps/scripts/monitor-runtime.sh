@@ -110,9 +110,10 @@ notify() {  # notify title body severity(warning|critical|info)
   esac
   if [ "${ok}" = "0" ]; then
     log "info" "alert delivered" "alert_delivered" "{}"
-  else
-    log "error" "alert delivery FAILED (webhook unreachable/rejected)" "alert_delivery_failed" "{}"
+    return 0
   fi
+  log "error" "alert delivery FAILED (webhook unreachable/rejected)" "alert_delivery_failed" "{}"
+  return 1
 }
 
 state_get() { jq -r "${1} // empty" "${STATE_FILE}" 2>/dev/null; }
@@ -145,17 +146,23 @@ evaluate_check() {
 
   if [ "${is_bad}" = "1" ] && [ "${cbad}" -ge "${BAD_THRESHOLD}" ]; then
     if [ "${active}" != "true" ]; then
-      notify "AION ${name} check FAILING" "${bad_headline} (${cbad} consecutive bad polls)" "critical"
-      state_set "${prefix}.alert_active = true | ${prefix}.last_alert_at = ${NOW} | ${prefix}.first_bad_at = (${prefix}.first_bad_at // ${NOW})"
+      # State advances only if the page was actually delivered (or log-only mode); a failed
+      # delivery leaves alert_active=false so the very next poll retries instead of waiting RE_ALERT_SECONDS.
+      if notify "AION ${name} check FAILING" "${bad_headline} (${cbad} consecutive bad polls)" "critical"; then
+        state_set "${prefix}.alert_active = true | ${prefix}.last_alert_at = ${NOW} | ${prefix}.first_bad_at = (${prefix}.first_bad_at // ${NOW})"
+      else
+        state_set "${prefix}.first_bad_at = (${prefix}.first_bad_at // ${NOW})"
+      fi
     elif [ "${RE_ALERT_SECONDS}" != "0" ] && [ "$((NOW - last_alert))" -ge "${RE_ALERT_SECONDS}" ]; then
-      notify "AION ${name} check STILL FAILING" "${bad_headline} (ongoing, ${cbad} consecutive bad polls)" "critical"
-      state_set "${prefix}.last_alert_at = ${NOW}"
+      notify "AION ${name} check STILL FAILING" "${bad_headline} (ongoing, ${cbad} consecutive bad polls)" "critical" \
+        && state_set "${prefix}.last_alert_at = ${NOW}"
     else
       log "warn" "${bad_headline}" "${name}_check_bad" "$(jq -nc --argjson n "${cbad}" '{consecutive_bad:$n}')"
     fi
   elif [ "${is_bad}" = "0" ] && [ "${cgood}" -ge "${GOOD_THRESHOLD}" ] && [ "${active}" = "true" ]; then
-    notify "AION ${name} check RECOVERED" "${recover_headline}" "info"
-    state_set "${prefix}.alert_active = false | ${prefix}.first_bad_at = null"
+    # A lost RECOVERED notice is retried next poll (alert_active stays true until it is delivered).
+    notify "AION ${name} check RECOVERED" "${recover_headline}" "info" \
+      && state_set "${prefix}.alert_active = false | ${prefix}.first_bad_at = null"
   else
     log "info" "${name} check ok" "${name}_check_ok" "{}"
   fi

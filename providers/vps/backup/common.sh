@@ -38,7 +38,7 @@ notify() {
         log_warn "NTFY_TOPIC not set, skipping push notification: $title"
         return 0
     fi
-    curl -s --max-time 15 \
+    curl -sS --fail --max-time 15 \
         -H "Title: ${title}" \
         -H "Priority: ${priority}" \
         -d "${message}" \
@@ -87,11 +87,9 @@ gpg_encrypt() {
 # HTTP 403 with an empty/undecodable body on backend auth, which clears up
 # on retry). Retry a few times with backoff before giving up for real.
 rclone_retry() {
-    local attempt rc
+    local attempt rc=0
     for attempt in 1 2 3; do
-        if rclone "$@"; then
-            return 0
-        fi
+        rclone "$@" && return 0
         rc=$?
         log_warn "rclone attempt $attempt failed (rc=$rc): rclone $* — retrying..."
         sleep $((attempt * 3))

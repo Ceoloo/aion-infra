@@ -54,6 +54,8 @@ ORDER BY created_at ASC;
 "
 
 echo
-echo "[report-stale-approvals] this script changed nothing. Resolve manually per mission owner:"
-echo "  docker exec -it ${CONTAINER} psql -U ${USER} -d ${DB} -c \"UPDATE approvals SET status='...', decided_by='...', decided_at=now(), note='...' WHERE approval_id='...'\""
-echo "  (only after the mission owner has actually reviewed the command_snapshot — never blind)"
+echo "[report-stale-approvals] this script changed nothing. Resolve per mission owner, never by direct SQL:"
+echo "  A raw UPDATE of approvals leaves the run and execution at awaiting_approval and skips the audit event."
+echo "  Use the runtime's decision route, as the verified human approver (only after reviewing the command_snapshot):"
+echo "    POST /v1/approvals/<approvalId>/decision   {\"approve\":false,\"decidedBy\":\"<operator actor id>\",\"note\":\"<why>\"}"
+echo "  See docs/stale-approval-disposition.md."

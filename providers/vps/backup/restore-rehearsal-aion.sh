@@ -66,7 +66,12 @@ IP="$(docker inspect "$C" --format '{{range .NetworkSettings.Networks}}{{.IPAddr
 ENVF="$(dec "$D/cfg.gpg" | tar -xOf - opt/aion/.env 2>/dev/null)"
 for pair in "aion_app:AION_APP_PASSWORD" "aion_migrator:AION_MIGRATOR_PASSWORD"; do
   role="${pair%%:*}"; var="${pair#*:}"; pw="$(printf '%s\n' "$ENVF" | sed -n "s/^${var}=//p" | head -1)"
-  if [ -n "$pw" ] && PGPASSWORD="$pw" docker exec -e PGPASSWORD "$C" psql -h "$IP" -U "$role" -d aion_data -tAc "SELECT 1" >/dev/null 2>&1; then ok "$role logs in over TCP (scram) with the password from the archived .env"; else no "$role could NOT log in with the archived .env password"; fi
+  # Passfile (0600, inside the throwaway container, removed right after) instead of PGPASSWORD in a process environment.
+  ok_login=0
+  if [ -n "$pw" ] && printf '%s:5432:aion_data:%s:%s\n' "$IP" "$role" "$pw" | docker exec -i "$C" sh -c 'umask 077; cat > /tmp/.rehearsal_pgpass' \
+     && docker exec -e PGPASSFILE=/tmp/.rehearsal_pgpass "$C" psql -h "$IP" -U "$role" -d aion_data -w -tAc "SELECT 1" >/dev/null 2>&1; then ok_login=1; fi
+  docker exec "$C" rm -f /tmp/.rehearsal_pgpass >/dev/null 2>&1
+  if [ "$ok_login" = 1 ]; then ok "$role logs in over TCP (scram) with the password from the archived .env"; else no "$role could NOT log in with the archived .env password"; fi
 done; unset ENVF pw
 # least privilege survives the restore: app can read/write data, cannot do DDL
 PROBE="$(docker exec "$C" psql -U postgres -d aion_data -c "BEGIN; SET LOCAL ROLE aion_app; CREATE TABLE public.rehearsal_ddl_probe(x int); ROLLBACK;" 2>&1)"
@@ -75,7 +80,7 @@ PROBE2="$(docker exec "$C" psql -U postgres -d aion_data -tAc "SET ROLE aion_app
 if printf '%s' "$PROBE2" | grep -q 'permission denied'; then ok "aion_app DDL denied (second probe form, no explicit transaction)"; else no "second DDL probe form NOT denied — said: $(printf '%s' "$PROBE2" | head -2 | tr '\n' ' ')"; fi
 # 4) every regular file in the config archive is byte-identical (by hash) to the live file
 SAME=0; DIFF=0
-while IFS= read -r f; do [ -f "/$f" ] || continue
+while IFS= read -r f; do [ -f "/$f" ] || { DIFF=$((DIFF+1)); log_warn "archived but absent on this host: $f"; continue; }
   a="$(dec "$D/cfg.gpg" | tar -xOf - "$f" 2>/dev/null | sha256sum | cut -d' ' -f1)"; l="$(sha256sum "/$f" | cut -d' ' -f1)"
   [ "$a" = "$l" ] && SAME=$((SAME+1)) || { DIFF=$((DIFF+1)); log_warn "archived != live: $f"; }
 done < <(dec "$D/cfg.gpg" | tar -t | grep -v '/$')

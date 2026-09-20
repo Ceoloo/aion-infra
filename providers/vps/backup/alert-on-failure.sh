@@ -14,8 +14,9 @@ if [ -z "${NTFY_TOPIC:-}" ]; then
     exit 0
 fi
 
-curl -s --max-time 15 \
+curl -sS --fail --max-time 15 \
     -H "Title: AION Backup: systemd unit failed" \
     -H "Priority: high" \
     -d "Unit ${UNIT} failed to run or exited non-zero at the systemd level (not a script-reported failure). Host: $(hostname). Check: journalctl -u ${UNIT}" \
-    "${NTFY_URL:-https://ntfy.sh}/${NTFY_TOPIC}" >/dev/null
+    "${NTFY_URL:-https://ntfy.sh}/${NTFY_TOPIC}" >/dev/null \
+    || { logger -t aion-backup "OnFailure alert for $UNIT was NOT delivered (ntfy unreachable or rejected)"; exit 1; }

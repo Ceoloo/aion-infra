@@ -75,8 +75,11 @@ verify_objects() {   # $1 config ciphertext  $2 roles ciphertext
   dec "$cfg" | tar -t | scope_check || rc=1
   c1="$(dec "$roles" | grep -c '^CREATE ROLE aion_app\b')"; c2="$(dec "$roles" | grep -c '^CREATE ROLE aion_migrator\b')"; c3="$(dec "$roles" | grep -c "PASSWORD 'SCRAM-SHA-256")"
   if [ "$c1" -ge 1 ] && [ "$c2" -ge 1 ] && [ "$c3" -ge 2 ]; then log_info "roles OK: aion_app + aion_migrator present with SCRAM password hashes (hashes not printed)"; else log_error "roles CHECK FAILED (app=$c1 migrator=$c2 hashes=$c3)"; rc=1; fi
-  sha_a="$(dec "$cfg" | tar -xOf - opt/aion/.env 2>/dev/null | sha256sum | cut -d' ' -f1)"; sha_l="$(sha256sum /opt/aion/.env | cut -d' ' -f1)"
-  if [ "$sha_a" = "$sha_l" ]; then log_info "content identity OK: archived .env hash == live .env hash (compared by hash, not shown)"; else log_warn "archived .env differs from the live .env (edited since this backup?)"; rc=2; fi
+  # Hash the archived .env; a pipeline failure (bad decrypt, missing member) is a hard failure, not "edited since".
+  if sha_a="$(set -o pipefail; dec "$cfg" | tar -xOf - opt/aion/.env 2>/dev/null | sha256sum | cut -d' ' -f1)" && [ -n "$sha_a" ] && sha_l="$(sha256sum /opt/aion/.env | cut -d' ' -f1)"; then
+    if [ "$sha_a" = "$sha_l" ]; then log_info "content identity OK: archived .env hash == live .env hash (compared by hash, not shown)"
+    else log_warn "archived .env differs from the live .env (edited since this backup?)"; [ "$rc" = 0 ] && rc=2; fi
+  else log_error "could not read the archived .env from the config archive"; rc=1; fi
   teardown_offline_keyring; return $rc
 }
 
