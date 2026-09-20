@@ -154,8 +154,8 @@ inferred with certainty.
 **3. `apr_63a095b9...`** (2026-09-12) — capability `crm.opportunity.update`,
 actor cohort `OL-001`, **`productionEconomic: true`**, `missionOrdinal: 1`
 of `cohortTarget: 100`. Would update a real GHL opportunity
-(`opportunityId: rGbIyrAvGDcmMEzjBER4`, contact "Annfiera McPherson",
-client "ModernRelx") to `stage: fdd0844f...`, `status: open`, `value: 500`.
+(a real GHL opportunity — id, contact and client names redacted from this public repo; see
+production `approvals.command_snapshot`) to `stage: fdd0844f…`, `status: open`, `value: 500`.
 **Notable: this is the same GHL opportunity ID used as the test target in
 the 2026-09-08 GHL live acceptance gate** (see
 [[project-aion-ghl-live-crm]]) — its real current state in GHL may no
@@ -169,7 +169,9 @@ real P1/P2, not designed or implemented this session (needs a policy
 decision — auto-expire after N days? escalate to whom? — not an infra
 question).
 
-## Resource limits + bounded logging — prepared, validated, NOT applied
+## Resource limits + bounded logging — APPLIED 2026-09-20 (both stages passed; evidence in [rollout-2026-09-20.md](rollout-2026-09-20.md))
+
+> The plan below is kept as written; it was executed as planned. Where reality differed (postgres stopped with an explicit `-t 60`, intake paused 22 s, restore-drill race found and fixed) see the rollout doc.
 
 `providers/vps/docker-compose.yml` now carries `deploy.resources.limits`
 and `logging.options` (bounded `json-file`, 10MB × 3 files) for

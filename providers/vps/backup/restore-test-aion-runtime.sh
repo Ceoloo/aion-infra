@@ -74,8 +74,9 @@ if [ -s "$DEC" ]; then
     docker run -d --rm --name restore-test-aion-runtime-pg \
         -e POSTGRES_PASSWORD=restoretest -e POSTGRES_USER=postgres -e POSTGRES_DB=aion_data \
         postgres:16-alpine >/dev/null 2>>"$LOG_FILE"
+    # TCP (-h 127.0.0.1), not the unix socket: the entrypoint's temporary init server listens on the socket only, so a socket check can pass just before the real restart and lose the restore (seen 2026-09-20).
     tries=0
-    until docker exec restore-test-aion-runtime-pg pg_isready -U postgres >/dev/null 2>&1; do
+    until docker exec restore-test-aion-runtime-pg pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; do
         sleep 1; tries=$((tries+1))
         if [ "$tries" -gt 30 ]; then fail "restore-test-aion-runtime-pg never became ready"; break; fi
     done

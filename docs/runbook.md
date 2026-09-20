@@ -262,6 +262,13 @@ storage destination when an approved, working one already existed. Left
 in the repo as a portable reference for a different environment (e.g. a
 host with no pre-existing B2/GPG setup), not as the active VPS path.
 
+## Recovery coverage, synthetic-data controls, GHL acceptance
+- What a DB restore does **not** recover, the out-of-band kit, and the prepared (not installed) config backup:
+  [recovery-kit.md](recovery-kit.md).
+- Synthetic proof records vs business-value reporting (guard PR, view fix SQL — not applied): [synthetic-data-controls.md](synthetic-data-controls.md).
+- AIO-17 acceptance (fixtures done; live blocked on a test tenant): [ghl-aio17-acceptance-plan.md](ghl-aio17-acceptance-plan.md).
+- Executed resource/logging rollout evidence and limitations: [rollout-2026-09-20.md](rollout-2026-09-20.md).
+
 ## Review stale/aged approval gates (read-only)
 
 ```bash
