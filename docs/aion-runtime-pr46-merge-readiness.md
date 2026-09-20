@@ -45,23 +45,24 @@ must answer 401/403 (GHL answers a foreign location with 403 "The token does not
 - The check itself was tested against a mock GHL (13 tests) and calibrated against the real API's answers; it has **not** yet run against a real test location, because none exists.
 - Live AIO-17 (`live-aio17`) is refused unconditionally by the guard.
 
-## 3. Required environment changes
-None are required for PR #46 to keep production working (row 1 above). Recommended, in this order, each needing your go-ahead:
-1. **Make the choice explicit** (removes the `crm_backend_inferred` warning and the reliance on inference):
-   - `.env`: add `GHL_BACKEND=live`
-   - `docker-compose.yml` runtime service `environment:` add `GHL_BACKEND: ${GHL_BACKEND:-}` (the variable is not passed through today; without this line `.env` has no effect)
-   - `.env.example`: document `GHL_BACKEND=live` (values `live|fake`; `fake` additionally needs `AION_ACK_FAKE_CRM=1` and is for image certification only)
-   - Applying needs `docker compose up -d --no-deps aion-runtime` (a runtime recreate, ~seconds; approval required).
-2. **Deploy the new image** with `scripts/deploy.sh` (`DEPLOY_IMAGE=<digest>`): validate → migrate (this PR adds **no** migration) → roll → readiness → automatic rollback on failure.
-   Check `/health/ready` for `crm_backend":"live"` afterwards.
-3. **Other deployment profiles.** `providers/gcp` and `providers/aws` pass `AION_ENVIRONMENT=<staging|production>` but **no GHL_* variables at all**. With the new image a
-   *production* deployment there refuses to start until it gets credentials (`GHL_API_KEY`/`GHL_LOCATION_ID`, via secret manager) or an explicit fake acknowledgement.
-   That is the intended behaviour (those profiles currently run the fake backend silently in production), but it is a breaking change for them. I have no evidence any is deployed;
-   check before promoting the image tag anywhere but the VPS.
+## 3. Required environment changes — explicit backend selection prepared and VERIFIED on the proposed image
+Nothing is required for production to keep working. Prepared (tracked in aion-infra PR #13, **not on the host**): compose passes `GHL_BACKEND: ${GHL_BACKEND:-}` to the runtime; `.env.example` documents `GHL_BACKEND=live`. Applying it = add `GHL_BACKEND=live` to `/opt/aion/.env` (secret file — back up first) + install that compose + `docker compose up -d --no-deps aion-runtime` (recreate, ~10 s). Safe with the *current* image (ignored). No credential is changed and no proof script is enabled.
+
+**Startup verified with the proposed image** — a local build of `origin/main` + PR #46 + PR #48 (`aion-runtime:candidate-20260920`, digest `sha256:d3d64bc836…`), the *proposed* compose rendered with the real `/opt/aion/.env`, database = a scratch restore of production, CRM base URL = a local capture server (nothing could reach GHL):
+| Configuration | Result |
+|---|---|
+| **A. proposed** (`GHL_BACKEND=live` added) | starts; `/health/ready` `crm_backend=live`; log `info crm_backend` (no warning) |
+| **B. today's `.env` unchanged / rollback state** (unset) | starts; `crm_backend=live`; `warn crm_backend_inferred` |
+| C. `GHL_BACKEND=live`, `GHL_API_KEY` blanked | **refuses** (`config_invalid`, exit 1) |
+| D. `GHL_BACKEND=fake` in production, no acknowledgement | **refuses** |
+| E. `GHL_BACKEND=Live` (case typo) | accepted as `live` |
+Requests that reached the CRM stand-in during all five boots: **0**. (Boot alone makes no CRM calls.)
+
+**AWS / GCP profiles — deployed or used by CI? No evidence of either.** `deploy-gcp.yml` is *dormant by design*: its jobs run only if `GCP_WORKLOAD_IDENTITY_PROVIDER` and the CI service-account variables exist; `gh variable list` and `gh secret list` on this repo returned nothing, so no plan or apply could have run here (CI's `terraform plan (staging)` shows *skipped*; its "successful" deploy-gcp runs only executed the image-resolve step). No workflow applies the AWS profile. Whether someone created an environment by hand from these modules cannot be known from the repo. Both profiles pass only `AION_ENVIRONMENT`, DB URLs and release metadata — **no `GHL_*`, no `AION_AUTH_MODE`/`AION_GATEWAY_API_KEYS`** — so a current image (auth is required off-local) would not start in either without more wiring. Action taken: both READMEs now carry a **NOT SUPPORTED until wired** banner listing what must be added (`GHL_BACKEND=live`, secret-backed `GHL_API_KEY`/`GHL_LOCATION_ID`, `AION_GATEWAY_API_KEYS`, `AION_AUTH_MODE=required`) and the boot-check to run. I did not change Terraform.
 
 ## 4. Rollback
-- **Env change (item 1):** delete the `GHL_BACKEND` line (and the compose passthrough) → recreate the runtime. Behaviour returns to inferred-live.
-- **Image (item 2):** `deploy.sh` rolls back automatically to the previous digest if readiness fails; manually: `DEPLOY_IMAGE=<previous digest> scripts/deploy.sh`.
+- **Env change:** delete the `GHL_BACKEND` line (and restore the compose backup) → recreate the runtime. Behaviour returns to inferred-live (config B above was booted and verified).
+- **Image:** `deploy.sh` rolls back automatically to the previous digest if readiness fails; manually: `DEPLOY_IMAGE=<previous digest> scripts/deploy.sh`.
   The previous digest is printed by `deploy.sh` ("previous runtime: …") and visible with `docker inspect` before the roll. Setting `GHL_BACKEND=live` on the *old* image is harmless (ignored).
 - No DB or data rollback is involved.
 

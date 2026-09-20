@@ -36,44 +36,36 @@ approval/run/execution `awaiting_approval`, sibling executions `succeeded`, 0 si
 - §3: **your call** — I lean to reject-as-superseded after re-checking the CRM state, but I am not treating the evidence for §3 as covering §1–2, or the reverse.
 - All: one at a time, re-verifying state after each, with notes such as *"SUPERSEDED (audit 2026-09-20): <specific reason>; closed by owner decision; no CRM action taken"*.
 
-## The production authorization path (verified WITHOUT submitting a production decision)
-Production runs `AION_AUTH_MODE=required` with two configured principals. The decision route requires: an authenticated principal with role `approve`; `decidedBy` equal to that principal's `actorId`;
-and that actor to exist in `actors` as a **human** (or be supplied in the request *and* the principal hold `register`).
+## The approval identity path, end to end (third pass — traced and fixed in aion-runtime PR #48)
+**Chain as it exists:** bearer token → *principal* (`AION_GATEWAY_API_KEYS`) → the durable *human actor* it is bound to (`principal.actorId`) → `POST /v1/approvals/:id/decision` → `approvals.decided_by` (FK → `actors`) + audit event.
+| Link | Finding |
+|---|---|
+| Console → runtime | The Console (a static Vercel SPA, `workforce-control`) sends **no bearer token at all** (its own source says browser bearer auth needs a BFF or session token that does not exist). In `required` mode every Console call is 401. It builds its own `actor` object with a self-declared permission list and sends `decidedBy=operator-console` (or `VITE_AION_OPERATOR_ID`). |
+| Principal → actor | `principal_ops_console` (operator; roles invoke+approve; tenant aion-systems) → `actorId=act_human_ops_1`. **`act_human_ops_1` is not in `actors`.** The string is the placeholder shipped in `.env.example` (and in a unit-test fixture); nothing in the repo, database or logs shows it was chosen as a real operator identity, and no decision was ever made as it. The runtime does not log which principal made a request, so whether the ops token has ever been used cannot be established. |
+| Authorization | `main` required `decidedBy` to equal the principal's actor **and** an actor row to exist (or be registered from the request body by a principal with `register`). |
+| Tenant boundary | **Not enforced on decisions.** Reproduced on an isolated copy: an operator bound to tenant B rejected tenant A's approval and vice-versa; a request with no tenant header succeeded. |
+| Persisted decision | `decided_by` = whatever the client claimed (validated only against the principal); audit event carried no principal. |
 
-| Principal (no tokens shown) | kind | `actorId` | roles | actor registered in `actors`? |
-|---|---|---|---|---|
-| `principal_ops_console` | operator | `act_human_ops_1` | invoke, approve | **no** |
-| `principal_revenue_copilot` | service | `act_service_revenue_copilot` | invoke | no (not an approver) |
-Registered human actors: `operator-console` and four proof approvers from 2026-09-08 (`act_a051…`, `act_8787…`, `act_a9bf…`, `act_e4d1…`). The Console's approval button sends `decidedBy=operator-console` (`VITE_AION_OPERATOR_ID` overrides).
+**Is `act_human_ops_1` the intended authorized operator? Not established.** It is the identity the ops token authenticates as, and it is a template value. I have **not** registered it. Registering it would make the token's holder — whoever that is — the approver of record for R2 gates.
+**Owner confirmation needed:** (a) who holds `principal_ops_console`'s token; (b) whether that is one person or shared; (c) the actor id and display name to register (this doc assumes the existing `act_human_ops_1` only because the token already authenticates as it — you may prefer a different id, which means changing the principal's `actorId` in `.env` and recreating the runtime).
 
-**Method:** the runtime (PR #46 build; the fix is aion-runtime PR #48) was run on a **scratch restore of production** (isolated container, `staging`, no CRM credentials) with the production principal configuration and real tokens (never printed).
-Every request below was made against that copy; production received none.
+**The fix (aion-runtime PR #48, draft, separate from PR #46 and from the cleanup PRs):** in `required` mode `decided_by` is **derived from `principal.actorId`**; a body `decidedBy` may only restate it (`403 approver_mismatch` otherwise); a client `actor` object is never used to identify or register the approver; the approver must already be a registered human; the approval's tenant must be within the principal's tenants and equal the request's tenant header (undeterminable tenant → denied); the audit trace and log record `principalId`/`principalKind`. A principal identifies a **credential** — if the token is shared, `decided_by` names the operator *account*, not a uniquely authenticated person (documented in `docs/approval-identity.md`).
+**Tests, real process + Postgres restored from production into an isolated container (no production request), fixture principals:** 15 scenarios, `main` vs PR — cross-tenant decisions succeed on `main` and are denied by the PR; impersonation (other registered human, forged id + actor object) denied on both; unauthenticated / service principal / unregistered approver denied; authorized reject and grant succeed, attributed to the authenticated actor with `principalId` in the audit; repeat decision and grant-after-reject → 409 with state unchanged; 10 unit tests, 5 mutations of the protections each caught. A final run with the **production principal shape** confirms: Console-style body → `approver_mismatch`; unregistered actor → `actor_not_registered`; after registering the actor *on the copy*, `{approve:false}` with no `decidedBy` → recorded, attributed to the principal's actor. The candidate image (main + #46 + #48) was also booted under the proposed configuration (see `aion-runtime-pr46-merge-readiness.md`).
+A rejection is answered `403` with `status: denied` — that is success for `approve:false`.
 
-| # | Request | Result |
-|---|---|---|
-| A1 | no credentials | 401 `auth_required` |
-| A2 | service principal | 403 `approve_forbidden` |
-| A3 | ops principal, `decidedBy=operator-console` (the Console default) | 403 `approver_mismatch` |
-| A4 | ops principal, `decidedBy=act_human_ops_1`, no actor object | 403 `actor_not_registered` |
-| A5 | same + a human actor object | 403 `register_forbidden` (principal lacks `register`) |
-| B | after inserting `act_human_ops_1` as a human actor **on the copy only**: ops principal, `decidedBy=act_human_ops_1`, `approve=false` | recorded: approval `rejected` (`decided_by=act_human_ops_1`), execution `denied`; the other two approvals still pending |
-Copy state after A1–A5: unchanged. **Production after the whole exercise: still 3 `pending`, 0 decided.**
+**Smallest deployment + data change (both need authorization; neither applied):**
+1. Merge aion-runtime #48 (and #46) → CI builds the image → `deploy.sh` with the digest (rollback: automatic on failed readiness, or the previous digest).
+2. One INSERT: `sql/register-operator-actor.sql` (`-v actor_id=… -v display_name=…`), tested on a copy incl. refusals; rollback `register-operator-actor-rollback.sql` (refuses if the actor has decided anything). Order: 1 then 2 — or 2 first, harmless with the old image (a decision still needs `decidedBy` to equal the actor there).
+3. The Console cannot decide in production until it authenticates (BFF/session) — a separate product change, **not** part of this fix. Until then decisions are made by an operator calling the route with the ops token.
+The three existing approvals remain undecided.
 
-**Finding:** with today's production configuration **no approval decision can be recorded** — neither through the route with the ops token nor via the Console's default approver id. The
-authenticated approver identity that exists is `principal_ops_console` → `act_human_ops_1`; that identity is simply not registered as a human actor. (Four earlier grants by `operator-console` exist from 2026-09-07/08; I did not determine when required-mode auth began, so I do not know how those were authorized.)
-I did not invent an actor id; the two existing identities are `act_human_ops_1` (authenticated, unregistered) and `operator-console` (registered, no principal maps to it).
-
-### Options to make the path work (each needs your approval; none applied)
-1. **Register the existing identity** — one `INSERT INTO actors` row for `act_human_ops_1` as `human` (production DB write, reversible with one DELETE; no restart). Tested on the copy (row B). The Console still sends `operator-console` until its `VITE_AION_OPERATOR_ID` is set to `act_human_ops_1` and rebuilt — a separate follow-up.
-2. **Point the principal at the registered actor** — change `principal_ops_console.actorId` to `operator-console` in `AION_GATEWAY_API_KEYS` (edits a secret; needs a runtime recreate). Aligns the Console with no Console change.
-3. Give the ops principal `register` — **not recommended** (broadens authority).
-I recommend (1) for closing these approvals (smallest, no restart), and (2) later for the Console.
-Whoever decides, note that `act_human_ops_1` is a shared operator identity: put the deciding person's name in the note, since the audit shows the actor, not the human.
+### Note on my earlier test
+The first-pass authorization check ran the runtime on a scratch copy of production with the **real** gateway tokens in that process's environment (localhost only, never printed). The later, fuller test suite used freshly generated fixture tokens. Recommendation stands from the review comment: prefer fixture principals; if you want, rotating the two gateway tokens is a cheap precaution (a `.env` edit + runtime recreate; **not** done and not required by any evidence of exposure).
 
 ## Decisions needed
 1. Which of the three to reject: §1, §2, and/or §3 (each on its own evidence above).
-2. Approval to make the decision path work (option 1 or 2), and to run the decisions in production one at a time.
-3. Whether `act_human_ops_1` is acceptable as the approver of record.
+2. The approver identity: who holds the ops token, and the actor id/display name to register.
+3. Authorization to deploy the identity fix and register the actor; then to run the decisions in production one at a time.
 
 ## Timeout / escalation (not built; needs a policy decision)
 Nothing ages out an unanswered approval, which is how these sat 8–12 days with no alert. `scripts/report-stale-approvals.sh` reports them read-only (it no longer suggests raw SQL); a timer that notifies via

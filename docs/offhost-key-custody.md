@@ -27,10 +27,11 @@ Why two places: the key file alone is useless without the passphrase (it is encr
    Import in a **throwaway keyring** and decrypt (you will be prompted for the passphrase locally):
    ```
    export GNUPGHOME=$(mktemp -d) && gpg --import ./aion-backup-private.asc
-   gpg --decrypt custody-check.gpg | sha256sum        # expect: d38921c1008e… (full value in /root/aion-rollout-20260920/custody/expected.sha256)
+   gpg --decrypt custody-check.gpg | sha256sum        # compare the COMPLETE 64-character value:
+   #   d38921c1008e00ab8dcf766338846c76307791139d86fa01b886221f21968b2a
    rm -rf "$GNUPGHOME"; unset GNUPGHOME
    ```
-   Matching hash ⇒ the key file *and* the stored passphrase together decrypt a backup-key ciphertext, from outside this host. Tell me only "matches"/"does not match".
+   Compare the whole hash, not a prefix. Matching hash ⇒ the key file *and* the stored passphrase together decrypt a backup-key ciphertext, from outside this host. Tell me only "matches"/"does not match".
 5. **Optional, stronger:** with a *read-only* B2 key on your machine, download one `config-aion/<stamp>/` object and decrypt it the same way. That also proves the B2 side; skip it if the check in step 4 passed.
 6. Record where each piece lives (names of the vault entries, not their contents) in your own notes.
 
@@ -49,3 +50,29 @@ Backups keep working in every option — they only need the *public* key.
 | **Custody of the key/passphrase off-host** | steps above | **Unproven until you run step 4** |
 | **Full-host rebuild** (bootstrap on new VPS, restore to disk, `validate-env`, `deploy.sh` with GHCR, Traefik/DNS/ACME, timers) | `recovery-kit.md` §"Clean-host restoration sequence" steps 1,2,4,7,8,9,10 | **Documented, untested** |
 Until step 4 is done and the untested steps have been rehearsed, full-host recovery is **not** declared covered.
+
+## Job inventory — what uses the private key / passphrase (checked 2026-09-20)
+| Job / script | Scheduled? | Needs | Notes |
+|---|---|---|---|
+| `backup-aion-runtime.sh db` (`aion-backup-runtime-db.timer`, hourly) | yes | **public key only** | encrypt → upload → sha256 read-back; never decrypts |
+| `backup-aion-config.sh run` (`aion-backup-config.timer`, daily) | yes | **public key only** | recipient check reads the packet header; no decryption |
+| `backup-aion-config.sh verify` / `local-verify` | manual | private key + passphrase | decrypts to check scope/roles/identity |
+| `restore-rehearsal-aion.sh`, `restore-test-aion-runtime.sh` | manual (drills) | private key + passphrase | restore into an isolated container |
+| `restore-test.sh`, `restore-test-local.sh` (legacy tier), `/opt/aion/scripts/backup.sh` / `restore.sh` (legacy S3, symmetric `BACKUP_PASSPHRASE`, no `.env.backup` on this host) | disabled / not installed | legacy key or symmetric passphrase | not covered by this change; no live timer references them (`aion-backup-db/full` timers are disabled) |
+| systemd `OnFailure` alert, monitor, cron jobs (`aion-scheduler`, revenue projector) | yes | none | no key material |
+So **no scheduled job needs the private key or passphrase.** Only manual verification/drills do.
+
+## How drills work without host-held decryption credentials (implemented in PR #13, tested)
+`common.sh` now resolves the credentials from `AION_RESTORE_KEY_DIR` (or `AION_RESTORE_KEY_FILE` / `AION_RESTORE_PASSPHRASE_FILE`), defaulting to today's host directory. To run a drill with nothing stored on the host:
+```
+KD=$(ssh root@<vps> 'd=$(mktemp -d /dev/shm/aionkey.XXXXXX); chmod 700 "$d"; echo "$d"')   # RAM-backed dir on the VPS, never on disk
+scp aion-backup-private.asc root@<vps>:$KD/PRIVATE_KEY_SAVE_OFFSITE_THEN_DELETE.asc
+read -rs -p "passphrase: " P; echo; printf 'Passphrase: %s\n' "$P" | ssh root@<vps> "cat > $KD/PRIVATE_KEY_PASSPHRASE.txt"; unset P   # typed locally, never echoed or stored
+ssh root@<vps> "AION_RESTORE_KEY_DIR=$KD /opt/aion-backup/bin/restore-rehearsal-aion.sh <config-stamp> <db-stamp>"
+ssh root@<vps> "find $KD -type f -exec shred -u {} \; ; rmdir $KD"
+```
+Tested 2026-09-20 from the staged scripts: config `local-verify`, B2 `verify`, the 18-check clean-host rehearsal and the DB restore drill **all passed with the credentials supplied from tmpfs**, and with an empty/missing directory the scripts fail early with a clear message and no output of secrets.
+Caveat: the credentials still touch this host's RAM/tmpfs during a drill (an intruder with root at that moment could read them). For a stricter model, run the drill on a different machine that pulls the B2 objects itself — not built.
+
+## Removal from the VPS — NOT proposed yet
+Preconditions (none met today): (1) your off-host decryption check above passes with the complete checksum; (2) you confirm the passphrase and key are stored separately; (3) after the staged scripts are installed, one drill has been run with run-time credentials by you (not me); (4) you decide whether to delete only the passphrase, or both. Nothing has been removed.

@@ -15,10 +15,9 @@ review-thread disposition, secret/identifier check, CI, and merge notes.
 | `providers/vps/docker-compose.yml` | `/opt/aion/docker-compose.yml` | identical (resource limits, log rotation, `stop_grace_period`); `main`'s compose differs by those 44 lines |
 | `.env.example` key names vs `/opt/aion/.env` key names | | same 32 names both sides (names only; values never read into this doc) |
 
-**Review-fix commit (this push) puts the repo ahead of the host** for: `scripts/{monitor-runtime,deploy,bootstrap-server,report-stale-approvals}.sh`,
-`backup/{common,alert-on-failure,backup-aion-config,restore-rehearsal-aion,restore-test-aion-runtime}.sh`. The host runs the previous
-(working, verified) versions. Installing them is a copy of nine files + no service restart (the timers re-read scripts each run);
-it needs your go-ahead. Until then, "installed == tracked" holds only for the previous head.
+**The review fixes put the repo ahead of the host** by 8 changed scripts and 2 new read-only scripts (10 files), plus a one-line compose change (`GHL_BACKEND` passthrough, not yet on the host).
+The host runs the previous, verified versions. `docs/host-update-batch-2026-09-20.md` has the exact snapshot/install/verify/rollback commands, a per-script disruption table, and the validation already done on staged copies.
+Installing the 10 scripts restarts nothing; the compose line needs a runtime recreate and is a separate approval. Until installed, "installed == tracked" holds only for the earlier head `617f5bf`.
 
 ## 2. Host-only state (intentionally not in git)
 | Item | Why not tracked | Recovery coverage |
@@ -55,18 +54,18 @@ Threads are resolved on GitHub only after you have looked at the fixes (not reso
 Not re-run after the fixes: the full B2 rehearsal (`restore-rehearsal-aion.sh`) and restore drill — they read the *installed* copies,
 which are unchanged. Run them after installing (§1).
 
-## 4. Secrets and customer identifiers in the proposed tree
+## 4. Secrets and customer identifiers in the proposed tree (and what a squash does NOT fix)
 Exact-value scan (live secret values, CRM record/contact ids, customer names loaded into memory only; nothing printed) over all 123
 files of the proposed tree: **0 hits**. Over every line *added* by the PR's commits: **4 hits, all in one early commit (`7cb7c82`)**
 that the branch head has since redacted. History was not rewritten (your instruction). Consequence: if the PR is merged with a
-*merge commit* or *rebase*, that commit lands on `main`. **Squash-merge** keeps it off `main`; GitHub still serves the PR head
-commit via `refs/pull/13/head` until GitHub support purges it — a visibility/history decision left to you.
+*merge commit* or *rebase*, that commit lands on `main`. A squash merge keeps `main`'s history free of it, **but it does not remove the identifiers from existing public history**: the PR branch, its commits, the PR page/diff and `refs/pull/13/head` stay publicly fetchable (also after the branch is deleted) until GitHub support purges them. The same identifiers are already in `main` history of five public repos (`exposure-review-2026-09-20.md`). Removing them needs a decision I have not taken: a history rewrite and/or visibility change (both explicitly off the table so far) plus a GitHub cached-view purge request.
 
-## 5. CI (PR head after this push)
-See the PR checks; before this push: `IaC static security scan`, `infra portability + verification`, `terraform fmt · validate` passed;
-`no committed secrets` failed on item 1 above; `terraform plan (staging)` skipped (no WIF configured).
+## 5. CI (final; PR head `3d5c259` when checked, later pushes are docs only)
+`no committed secrets` **passes** (was the failing check), `infra portability + verification` pass, `terraform fmt · validate` pass, CodeRabbit pass, `terraform plan (staging)` skipped (no WIF configured). `IaC static security scan` passes too — every check on the head is green or skipped. GitHub reports `mergeStateStatus: CLEAN`. **Unresolved review threads:** the 12 original threads are fixed in the repo but still open on GitHub, plus 5 new CodeRabbit threads on the later commits, all now addressed in code (scratch-credential note documented; passfile escaping; `.env` authority in `deploy.sh`; exit-code normalisation; rollback→re-apply). I did not resolve any thread on GitHub.
 
 ## 6. Merge notes
-- PR #12 (audit doc) is clean and also edits `docs/runbook.md`; merge **#12 first**, then rebase/merge #13 (a squash of #13 onto updated main).
-- `docs/audit-2026-09-20-followup-slices.md` references #12's audit document.
+- **PR #12 is not required for #13, and need not be merged for ordering.** #13's branch already contains #12's only commit (`710af12`, ancestor of the #13 head): its audit doc is byte-identical in #13, and its `runbook.md` section is a subset of #13's. Merging #13 delivers everything in #12; #12 would then be redundant (close it as superseded, or merge it first only if you want its commit to land separately — no dependency either way).
+- #12's contents are safe: the exact-value secret/identifier scan over its commit message, diff, PR title/body and comments found 0 hits (2 files: the audit doc and a runbook section).
+- `docs/audit-2026-09-20-followup-slices.md` references #12's audit document, which #13 also contains.
+- **Cleanup PRs stay separate from runtime behaviour:** the four cleanup PRs (aion-docs #65, aion-core #26, aion-products #30, aion-runtime #47) touch only fixtures/tests/proof defaults/docs — `#47`: `fake-ghl-backend.ts` (one fixture string), `ghl-phase-ab-proof-matrix.ts`, and the two live-proof scripts; `#30`: sample-preset text in `NewMission.tsx` (renames the sample-preset handler). Runtime behaviour changes live only in aion-runtime #46 (backend policy/proof guard) and #48 (approval identity). #47 and #46 both edit the two live-proof scripts, and #46 and #48 both edit `package.json`'s script list: whichever merges second needs a trivial rebase.
 - No production action follows from merging: units/scripts are already live; merging only makes git match the host (plus the fixes in §1).
