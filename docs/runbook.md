@@ -166,6 +166,97 @@ If `aion-runtime` restarts repeatedly with `config_invalid` in its logs:
    container-restart-count alerting so a repeat doesn't run silently for
    days — see `docs/audit-2026-09-20-vps-execution-readiness.md`.
 
+## Runtime failure detection (VPS — aion-monitor)
+
+`providers/vps/scripts/monitor-runtime.sh` runs on the HOST via
+`aion-monitor.timer` (every 60s), independent of `aion-runtime` itself —
+it checks container state (`docker inspect`) and the external
+`/health/ready` endpoint, so it still works when the runtime is fully down.
+Built after the 2026-09-14 6-day silent outage (aion-infra#12); see
+`docs/audit-2026-09-20-vps-execution-readiness.md` and
+`docs/audit-2026-09-20-followup-slices.md`.
+
+```bash
+# check it's running and see recent findings
+systemctl status aion-monitor.timer
+journalctl -u aion-monitor.service -n 50 --no-pager
+
+# one-off manual run (e.g. right after a deploy)
+systemctl start aion-monitor.service && journalctl -u aion-monitor.service -n 10 --no-pager
+```
+
+Config: `/opt/aion/.env.monitor` (root 0600; see `.env.monitor.example` —
+thresholds + optional `ALERT_WEBHOOK_URL`). **No alert destination is wired
+by default** — until `ALERT_WEBHOOK_URL` is set, findings are detected,
+debounced, and logged to the journal only; nothing pages anyone. To wire
+one: set `ALERT_WEBHOOK_URL` (Slack-compatible JSON by default;
+`ALERT_FORMAT=raw` for a generic `{title,body,timestamp}` payload), then
+`systemctl restart aion-monitor.timer` is not even needed — the next poll
+picks up the new env file automatically (`EnvironmentFile=-` is re-read
+per invocation, since each run is a fresh `Type=oneshot` process).
+
+It alerts on: container missing, stuck restarting, unhealthy, external
+`/health/ready` non-200, and its own inability to reach the Docker daemon
+(reported distinctly, never confused with "target is fine"). It does NOT
+alert on a single blip — `BAD_THRESHOLD` consecutive bad polls required
+(default 3) — and a container recreate resets its restart-count baseline
+rather than treating a fresh healthy instance as still-failing.
+
+## Validate `.env` before recreating a container (VPS)
+
+`providers/vps/scripts/validate-env.sh` is already a `deploy.sh` preflight
+— run it manually after any hand-edit of `/opt/aion/.env` too, before
+`docker compose up`:
+
+```bash
+cd /opt/aion && ./scripts/validate-env.sh
+```
+
+Checks every `${VAR:?...}` required var is non-empty (via Compose's own
+resolver — never re-implements dotenv parsing) and that JSON-shaped vars
+(`AION_GATEWAY_API_KEYS`) actually parse. This is the direct fix for the
+2026-09-14 incident: the bug wasn't that validation was hard, it's that
+nothing ran it.
+
+## Enable off-host backups (VPS — not active by default)
+
+`providers/vps/scripts/backup.sh` / `restore.sh` already exist and work;
+they need S3-compatible credentials, which nothing on the box has today.
+
+1. Provision storage (Cloudflare R2 recommended — free egress, ~$0.015/GB-
+   month): dash.cloudflare.com → R2 → create bucket → Manage API Tokens →
+   token scoped to that bucket only (Object Read & Write). Endpoint is
+   `https://<account_id>.r2.cloudflarestorage.com`.
+2. `cp providers/vps/.env.backup.example /opt/aion/.env.backup && chmod 600
+   /opt/aion/.env.backup` — fill in `PGDUMP_URL`, `BACKUP_PASSPHRASE`
+   (generate with `openssl rand -base64 32`, store it OFF this box too),
+   `S3_ENDPOINT`/`S3_BUCKET`/`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`.
+3. Test once by hand: `cd /opt/aion && ./scripts/backup.sh`.
+4. Install the timer: copy `providers/vps/system/aion-backup.{service,timer}`
+   to `/etc/systemd/system/`, `systemctl daemon-reload && systemctl enable
+   --now aion-backup.timer`.
+5. **Prove restore works** (never skip this — a backup that's never been
+   restored is not a backup): `BACKUP_KEY=<latest object key> ./scripts/
+   restore.sh` — restores into an isolated, disposable container and
+   validates the 7 canonical tables, then tears itself down. Never touches
+   the live database.
+
+## Review stale/aged approval gates (read-only)
+
+```bash
+STALE_HOURS=24 providers/vps/scripts/report-stale-approvals.sh
+```
+
+Lists `approvals` still `pending` past the age threshold and any
+`executions` stuck `awaiting_approval`. **Never auto-approves, rejects, or
+replays anything** — resolve manually, and only after actually reviewing
+each approval's `command_snapshot`:
+
+```bash
+docker exec -it aion-postgres-1 psql -U postgres -d aion_data -c \
+  "UPDATE approvals SET status='rejected', decided_by='<operator>', decided_at=now(), note='<why>' WHERE approval_id='<id>'"
+```
+
 ## Human database access (break-glass)
 
 Exceptional only (§38). Prefer read-only, authenticated, logged:

@@ -56,6 +56,31 @@ Log retention is bounded per environment (staging 30 days, production 60) via th
 `_Default` log bucket (§40) — verbose logs are not kept forever, and no sensitive
 business payloads are stored in logs.
 
+## Alerts (VPS provider — host-level, not Cloud Run)
+
+The GCP `observability` module above has no equivalent on the VPS provider
+(no managed alerting product exists there). Instead: `providers/vps/scripts/
+monitor-runtime.sh` on a 60s systemd timer, running on the HOST — not inside
+any container, so it has no dependency on `aion-runtime` being reachable.
+Checks: container missing/restarting/unhealthy, external `/health/ready`
+non-200, and the monitor's own ability to reach the Docker daemon (a
+distinct failure mode, never conflated with "target is fine"). Debounced
+(N consecutive bad polls before alerting, configurable), deduplicated
+(re-notifies at a configurable cadence while an incident stays open rather
+than once per poll), recreate-aware (a container recreate resets the
+restart-count baseline instead of counting a fresh healthy instance as
+still-failing), and sends a recovery notice on return to health. Built
+2026-09-20 in direct response to a 6-day undetected crash-loop (aion-infra#12)
+— see [docs/audit-2026-09-20-vps-execution-readiness.md](audit-2026-09-20-vps-execution-readiness.md)
+and [runbook.md](runbook.md) "Runtime failure detection".
+
+No alert destination is wired by default (`ALERT_WEBHOOK_URL` unset) —
+findings are still detected, debounced, and logged to the systemd journal;
+delivery is opt-in once an operator authorizes a specific destination
+(Slack/Discord/generic webhook). This is a deliberate, honest default, not
+an oversight: log-only is a valid operating state during evaluation, not a
+disabled feature pretending to be enabled.
+
 ## What is deliberately not built
 
 No custom metrics pipeline, tracing backend, dashboards platform, or alert

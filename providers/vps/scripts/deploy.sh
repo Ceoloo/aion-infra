@@ -39,11 +39,19 @@ if [ -n "${DEPLOY_IMAGE:-}" ]; then
   echo "[deploy] .env updated from CI: AION_IMAGE=${DEPLOY_IMAGE} GIT_SHA=${DEPLOY_GIT_SHA:-<unchanged>}"
 fi
 
-# Load config for this script (compose reads .env itself for interpolation).
+# Load config for this script (compose reads .env itself for interpolation;
+# these bash copies are only for THIS script's own scalar checks below — they
+# never substitute for compose's own resolution of what containers get).
 set -a; . ./.env; set +a
 : "${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}"
 : "${AION_DOMAIN:?set AION_DOMAIN in .env}"
 : "${AION_IMAGE:?set AION_IMAGE in .env}"
+
+# Preflight: every ${VAR:?...} required var + JSON-shaped vars (see
+# scripts/validate-env.sh — this is the fix for the 2026-09-14 incident,
+# aion-infra#12/#13). Runs before any pull/migrate/roll; never prints values.
+echo "[deploy] validating .env (required vars + JSON-shaped vars)"
+"$(dirname "$0")/validate-env.sh"
 
 compose() { docker compose "$@"; }
 

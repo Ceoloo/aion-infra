@@ -1,0 +1,14 @@
+[Unit]
+Description=AION encrypted off-host Postgres backup (aion-infra#14)
+After=docker.service
+
+[Service]
+Type=oneshot
+# Root-owned 0600, contains PGDUMP_URL/BACKUP_PASSPHRASE/S3_* — NOT the same
+# file as .env or .env.monitor. Does not exist until an operator has
+# provisioned S3-compatible storage; the timer below fires the service
+# regardless, and backup.sh fails loudly (`: "${VAR:?}"`) with a clear
+# missing-credential message rather than silently skipping.
+EnvironmentFile=/opt/aion/.env.backup
+ExecStart=/opt/aion/scripts/backup.sh
+User=root

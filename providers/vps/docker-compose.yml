@@ -57,6 +57,19 @@ services:
       start_period: 10s
       retries: 3
     stop_grace_period: 30s
+    # Sized from measured baseline (2026-09-20, idle: ~23MiB RSS, 0% CPU) with
+    # generous headroom, not a load test (aion-infra#14). Tighten or raise
+    # once real traffic is observed.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - internal
       - traefik
@@ -117,6 +130,18 @@ services:
       start_period: 10s
       retries: 3
     stop_grace_period: 30s
+    # Sized from measured baseline (2026-09-20, idle: ~32MiB RSS, 0% CPU) with
+    # generous headroom, not a load test (aion-infra#14).
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - internal
       - traefik
@@ -152,6 +177,19 @@ services:
       timeout: 5s
       retries: 10
     networks: [internal]
+    # Sized from measured baseline (2026-09-20, idle: ~33MiB RSS, 0% CPU) with
+    # generous headroom for connection/shared-buffer growth, not a load test
+    # (aion-infra#14).
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ── Legacy Caddy (only when the host has NO Traefik). Profile: caddy ──────
   # Do not enable this profile next to an existing Traefik on :80/:443.
