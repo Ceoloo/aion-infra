@@ -268,6 +268,8 @@ host with no pre-existing B2/GPG setup), not as the active VPS path.
 - Synthetic proof records vs business-value reporting (guard PR, view fix SQL — not applied): [synthetic-data-controls.md](synthetic-data-controls.md).
 - AIO-17 acceptance (fixtures done; live blocked on a test tenant): [ghl-aio17-acceptance-plan.md](ghl-aio17-acceptance-plan.md).
 - Executed resource/logging rollout evidence and limitations: [rollout-2026-09-20.md](rollout-2026-09-20.md).
+- Exposure review of customer identifiers/credentials in the public repos: [exposure-review-2026-09-20.md](exposure-review-2026-09-20.md).
+- Stale approvals — evidence and proposed audited disposition: [stale-approval-disposition.md](stale-approval-disposition.md).
 
 ## Review stale/aged approval gates (read-only)
 

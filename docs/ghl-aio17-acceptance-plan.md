@@ -29,13 +29,18 @@ deliberately not written blind now, because it would perform live writes):
    duplicate; a foreign tenant is denied; `conversation.*`/`appointment.create` still `CAPABILITY_DISABLED`.
 4. Report as **live-integration evidence against the test tenant**, list created ids for manual cleanup.
 
-## Hazards found in existing scripts (do not run casually)
-- `proof:ghl-live-capability` **defaults `AION_RUNTIME_URL` to the production Runtime and targets the real
-  client contact/opportunity**, and performs live writes (a note, an R2 stage update). It is the 2026-09-08
-  acceptance gate, not a safe smoke test.
-- `proof:ghl-live-acceptance` needs `GHL_*` and starts a local Runtime on the live backend.
-- Any proof run on this host with `/opt/aion/.env` loaded would select the live backend. The revenue proof is now
-  guarded (aion-runtime PR #46); the others are not.
+## Hazards found in existing scripts — and their fix (aion-runtime PR #46, draft, CI green)
+Before: `proof:ghl-live-capability` defaulted `AION_RUNTIME_URL` to the production Runtime, the production tenant and real
+client record ids, and wrote live (a note, an R2 stage update); any proof run on a host with the deployment `.env`
+loaded selected the **live** backend just because credentials existed; 13 proof scripts inherited that.
+After PR #46 (not yet merged): every proof defaults to an explicit **fake** backend and *refuses* if GHL credentials are
+present; the live proofs have no production defaults. A live run needs **all** of: `AION_PROOF_LIVE=1`,
+`GHL_BACKEND=live`, `GHL_LOCATION_ID` in `AION_PROOF_GHL_TEST_LOCATIONS`, `AION_PROOF_CREDENTIAL_SCOPE=test-location`,
+explicit `GHL_ACCEPTANCE_TENANT` (not a production tenant) / `_CONTACT_ID` / `_OPPORTUNITY_ID` / `_PRIOR_STAGE` /
+`_TARGET_STAGE` (none a known production id — those are held only as SHA-256), and for `live-capability` an explicit
+loopback or allowlisted `AION_RUNTIME_URL`. `live-aio17` is refused unconditionally: **live AIO-17 execution stays
+blocked** until you authorize a test tenant. Prohibited configurations are proven to fail before any network request
+(72 tests, capture server sees 0 requests). See `docs/synthetic-data-controls.md`.
 
 ## Read-only GHL check of the stale-approval opportunity (DONE 2026-09-20; two GET calls, zero writes)
 Opportunity `rGbI…` (id, client and lead names redacted — this repo is public): status `open`, value `500`, pipeline

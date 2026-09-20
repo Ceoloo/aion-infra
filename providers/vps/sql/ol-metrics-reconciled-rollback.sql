@@ -1,5 +1,11 @@
--- ROLLBACK: restores the exact pre-change definitions (captured from /opt/aion/ol-metrics.schema.sql, 2026-09-20).
+-- ROLLBACK of ol-metrics-reconciled.sql: restores the exact pre-change view definitions (captured 2026-09-20 from
+-- /opt/aion/ol-metrics.schema.sql) and drops only the two views this change added. The classification TABLE is
+-- deliberately KEPT as evidence of what was decided (nothing references it after rollback). To remove it too, run
+-- the commented DROP by hand.
 BEGIN;
+SET LOCAL ROLE aion_migrator;
+DROP VIEW IF EXISTS ol_metrics.unclassified_missions;
+DROP VIEW IF EXISTS ol_metrics.business_value_ledger;
 CREATE OR REPLACE VIEW ol_metrics.mission_record AS
  WITH ex AS (
          SELECT executions.mission_id,
@@ -114,4 +120,5 @@ CREATE OR REPLACE VIEW ol_metrics.cohort_kpis AS
     round((sum(human_minutes) / NULLIF((sum(economic_value) / 1000.0), (0)::numeric)), 2) AS human_minutes_per_1k_ev
    FROM ol_metrics.mission_record
   GROUP BY cohort;
+-- DROP TABLE ol_metrics.mission_classification;   -- only if you also want the classification evidence gone
 COMMIT;
