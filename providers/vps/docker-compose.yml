@@ -176,6 +176,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    # Previously unset (defaults to Docker's own 10s). Postgres's own SIGTERM
+    # handling is a "Fast Shutdown" (clean checkpoint, forces clients off —
+    # safe, not corrupting, just not "Smart" graceful) — 60s gives it real
+    # headroom to complete a checkpoint under load, at negligible cost since
+    # a stop only waits this long if shutdown is actually still in progress.
+    stop_grace_period: 60s
     networks: [internal]
     # Sized from measured baseline (2026-09-20, idle: ~33MiB RSS, 0% CPU) with
     # generous headroom for connection/shared-buffer growth, not a load test

@@ -102,49 +102,238 @@ not designed or implemented this session (would need product input: what
 should happen to an R2 action nobody approved in N days — auto-expire?
 escalate to whom? — that's a policy decision, not an infra one).
 
-## Resource limits + bounded logging — prepared, not applied
+## Resource limits + bounded logging — prepared, validated, NOT applied
 
 `providers/vps/docker-compose.yml` now carries `deploy.resources.limits`
 and `logging.options` (bounded `json-file`, 10MB × 3 files) for
-`aion-runtime`, `revenue-copilot`, and `postgres`. Validated:
+`aion-runtime`, `revenue-copilot`, and `postgres`, plus an explicit
+`stop_grace_period: 60s` for `postgres` (previously unset, defaulting to
+Docker's own 10s — see "Graceful shutdown" below).
 
-- YAML parses; `docker compose config` resolves cleanly against the real
-  production `.env` (dry run only — confirmed via `--project-directory
-  /opt/aion`, nothing was applied to the running containers).
-- Limits sized from a real measured baseline taken this session (idle):
-  `aion-runtime` ~23MiB RSS/0% CPU → capped at 512M/1.0 CPU;
-  `revenue-copilot` ~32MiB/0% → 512M/0.5 CPU; `postgres` ~33MiB/0% → 1G/1.0
-  CPU. All have large headroom over observed usage — these are safety
-  backstops against a runaway process on a 7.8GB-RAM/2-vCPU host with
-  `immich` also resident, not a tight production sizing (no load test has
-  been run — see the main audit's Phase 3 gap).
+### Exact diff (per service)
 
-**Not applied** — every one of these 3 containers is currently healthy;
-applying the change means `docker compose up -d` recreating all three,
-which is a production-service restart under this mission's own rule 5 and
-needs the same explicit approval as the original crash-loop fix.
+```diff
+  aion-runtime:
+    ...
+    stop_grace_period: 30s
++   deploy:
++     resources:
++       limits:
++         cpus: "1.0"
++         memory: 512M
++   logging:
++     driver: json-file
++     options:
++       max-size: "10m"
++       max-file: "3"
+    networks: [internal, traefik]
 
-**Exact change, impact, validation, rollback, if approved:**
-- Command: `cd /opt/aion && docker compose up -d aion-runtime revenue-copilot postgres`
-  (after `scp`-ing the updated `docker-compose.yml` from this PR onto the
-  box, per the existing "sync compose labels before image roll" procedure).
-- Impact: brief reconnect/restart of all 3 (seconds, not minutes — same
-  class of change as any other container recreate); no image change, no
-  migration.
-- Validation: `docker inspect --format '{{.State.Health.Status}}'` on all 3
-  → `healthy`; `curl .../health/ready` → 200; `docker stats` shows the new
-  limits are in effect (`MEM USAGE / LIMIT` column changes from `7.755GiB`
-  to the new per-container cap).
-- Rollback: `git checkout` the previous `docker-compose.yml` on the box,
-  `docker compose up -d` again — same symmetry as any other compose change,
-  no data involved.
+  revenue-copilot:
+    ...
+    stop_grace_period: 30s
++   deploy:
++     resources:
++       limits:
++         cpus: "0.5"
++         memory: 512M
++   logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+    networks: [internal, traefik]
 
-## Backups — prepared, not activated (needs a storage decision)
+  postgres:
+    ...
+    healthcheck: { ... }
++   stop_grace_period: 60s
+    networks: [internal]
++   deploy:
++     resources:
++       limits:
++         cpus: "1.0"
++         memory: 1G
++   logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+```
 
-`backup.sh`/`restore.sh` already existed and work; `system/aion-backup.
-{service,timer}` and `.env.backup.example` are new this session (not
-installed on the box — see `docs/runbook.md` "Enable off-host backups" for
-the exact activation steps once R2, or any S3-compatible storage, has
-credentials). This is a genuine recurring-cost decision (new cloud storage
-spend) and stays with the operator per this mission's rule 5 — prepared as
-a ready-to-run PR, not executed.
+Full exact diff: `git diff` in aion-infra PR #13 against `/opt/aion/docker-compose.yml`.
+
+### Memory/CPU limits — measured usage + headroom (fresh snapshot, 2026-09-20)
+
+| Container | Measured (idle, live) | Proposed limit | Headroom |
+|---|---|---|---|
+| `aion-aion-runtime-1` | 29.5MiB / 3.7% CPU | 512M / 1.0 CPU | ~17x memory |
+| `aion-revenue-copilot-1` | 32.0MiB / 0% CPU | 512M / 0.5 CPU | ~16x memory |
+| `aion-postgres-1` | 33.5MiB / 2.8% CPU | 1G / 1.0 CPU | ~30x memory |
+
+Host: 7.8GiB RAM total, 6.1GiB available at snapshot time. Immich (already
+capped from the 2026-08-11 hardening pass: 768M+1G+128M) + Traefik (256M) +
+these 3 new caps = ~4.15G worst-case combined hard ceiling if every
+container simultaneously hit its cap — leaves ~3.6G for the OS, well within
+capacity. These are safety backstops sized for headroom, not a tight
+production sizing — no load test has been run (Phase 3 gap, main audit).
+
+### Graceful shutdown — confirmed and newly hardened
+
+- **aion-runtime / revenue-copilot**: the deployment contract
+  (`contracts/deployment-contract.md`) documents "Drains and exits `0` on
+  `SIGTERM`" as the required image behavior. Not independently re-verified
+  against the running image's source this session (would need
+  aion-runtime's source or an active-load drain test); `stop_grace_period:
+  30s` (already set, unchanged) gives it real time to do so before Docker
+  escalates to `SIGKILL`.
+- **postgres**: `docker stop` sends `SIGTERM`, which vanilla Postgres
+  treats as **Fast Shutdown** — forces clients off but always completes a
+  clean checkpoint first (not corrupting; not as graceful as Smart
+  Shutdown, which is `SIGINT`, but safe). Previously no explicit
+  `stop_grace_period` was set (Docker's own 10s default) — **newly added:
+  60s**, so a checkpoint under real load has headroom to complete before
+  `SIGKILL` would ever fire.
+- **Volume preservation**: `aion_pgdata` is a named Docker volume
+  (confirmed via `docker volume inspect`, `Mountpoint /var/lib/docker/
+  volumes/aion_pgdata/_data`, 68MB). A container recreate replaces only the
+  container, never the volume — `docker compose up -d postgres` re-attaches
+  the same volume by name. Confirmed unaffected by any of this session's
+  container recreates so far (StartedAt only changes on the containers
+  actually recreated, volume Mountpoint/CreatedAt is unchanged throughout).
+
+### Active executions — checked live, zero in flight
+
+```sql
+SELECT status, count(*) FROM executions GROUP BY status;
+-- awaiting_approval: 3, denied: 1, failed: 13, succeeded: 75 — no
+-- 'running'/'in_progress'/'executing' rows exist right now.
+SELECT state, count(*) FROM runs GROUP BY state;
+-- same picture: awaiting_approval / completed / denied / failed only.
+```
+
+**Zero executions are currently mid-flight** — a recreate today would drain
+nothing. This is a point-in-time fact, not a standing guarantee: re-run
+this check immediately before actually applying the change, since new work
+could arrive between now and approval.
+
+### Sequencing — services CAN be updated separately, and should be
+
+Recommend **two separate actions, not one**:
+
+1. **`aion-runtime` + `revenue-copilot` together** (stateless, no volume,
+   already-proven recreate pattern from the crash-loop fix): lower risk,
+   can go first.
+2. **`postgres` separately**, in its own deliberate window, **immediately
+   preceded by a fresh on-demand backup** (`/opt/aion-backup/bin/
+   backup-aion-runtime.sh db` — now built and verified, takes ~2s) — the
+   one container in this change where a mistake has real durable-state
+   consequences, so it gets its own moment and its own fresh safety net,
+   not bundled into the same action as the two stateless services.
+
+### Rollback — explicit file snapshot, not a blanket git operation
+
+`/opt/aion` on the VPS is a plain directory (files arrive via `scp` from
+CI/deploy, per the existing "sync compose labels" procedure) — it is
+**not** a git checkout, and there is other, unrelated in-progress state on
+this box that a blanket `git checkout`/`git clean` anywhere near it must
+never touch. Rollback here means a plain file snapshot:
+
+```bash
+# Before applying:
+cp /opt/aion/docker-compose.yml /opt/aion/docker-compose.yml.bak.pre-limits.$(date -u +%Y%m%d%H%M%S)
+scp providers/vps/docker-compose.yml root@<vps>:/opt/aion/docker-compose.yml   # or local edit if already on-box
+
+# Apply (step 1, stateless services):
+cd /opt/aion && docker compose up -d aion-runtime revenue-copilot
+
+# Validate:
+docker inspect --format '{{.State.Health.Status}}' aion-aion-runtime-1 aion-revenue-copilot-1   # both -> healthy
+curl -s https://runtime.srv1655818.hstgr.cloud/health/ready   # -> 200
+docker stats --no-stream aion-aion-runtime-1 aion-revenue-copilot-1   # MEM USAGE / LIMIT shows the new caps, not 7.755GiB
+
+# Apply (step 2, postgres — separate action, fresh backup first):
+/opt/aion-backup/bin/backup-aion-runtime.sh db
+cd /opt/aion && docker compose up -d postgres
+
+# Validate:
+docker inspect --format '{{.State.Health.Status}}' aion-postgres-1   # -> healthy
+docker exec aion-postgres-1 psql -U postgres -d aion_data -c "SELECT count(*) FROM executions;"   # -> 92 (or current count), proves the volume survived
+
+# Rollback (either step, if validation fails):
+cp /opt/aion/docker-compose.yml.bak.pre-limits.<timestamp> /opt/aion/docker-compose.yml
+cd /opt/aion && docker compose up -d <affected service(s)>
+```
+
+No data operation is involved in rollback — it only ever re-applies a
+saved file and recreates a container, exactly symmetric with the forward
+change.
+
+## Backups — DONE: an existing, approved, working destination was found and used
+
+No new credentials were needed. `/opt/aion-backup/` (built 2026-08-11, for
+the retired legacy stack, timers disabled 2026-09-02 — see
+[[project_vps_infra_standardization]]) already has a fully working,
+previously-verified offsite pipeline: **Backblaze B2** (bucket
+`aion-prod-backups-ceoloo`, via `rclone` remote `b2:`), **GPG encryption**
+(RSA4096, public-key-only on the box — the private key can decrypt nothing
+from this host, by design), and **ntfy.sh** success/failure alerting. The
+August setup doc flagged the B2 account's download cap as exhausted,
+blocking restores — **confirmed fixed this session** (a real object was
+downloaded and read back before touching anything else).
+
+**Canonical DB + volume, precisely identified:** database `aion_data` in
+container `aion-postgres-1`, backed by named Docker volume `aion_pgdata`
+(`/var/lib/docker/volumes/aion_pgdata/_data`, 68MB, confirmed via `docker
+volume inspect`).
+
+**What was built** (new, minimal, additive — the existing pipeline's other
+modules for Immich/n8n/config/Traefik-certs were deliberately left
+untouched, out of this mission's AION-execution scope):
+- `/opt/aion-backup/bin/backup-aion-runtime.sh` — dumps `aion_data` from
+  `aion-postgres-1`, reusing the existing `common.sh` (GPG encrypt → B2
+  `rclone rcat` → SHA256 checksum verify) unchanged.
+- `/opt/aion-backup/bin/restore-test-aion-runtime.sh` — downloads the real
+  encrypted object from B2 (not local staging), decrypts with the
+  **offline** private key into a throwaway keyring, restores into an
+  isolated, disposable `postgres:16-alpine` container, verifies schema +
+  representative rows, tears everything down.
+- `aion-backup-runtime-db.service`/`.timer` — hourly, **live and enabled**.
+- A retention prune scoped to `db/` only (48h flat window) — deliberately
+  **not** wired to the shared `prune-backups.sh`, since that script also
+  GFS-prunes `full/`, which holds the legacy Immich/config/n8n snapshots
+  from Aug–Sep that are outside this mission's scope to delete.
+
+**Evidence — full cycle run twice, real offsite storage, real restore:**
+1. `backup-aion-runtime.sh db` run manually → dump, GPG-encrypt, upload to
+   `b2:aion-prod-backups-ceoloo/db/20260920_063256_manual/`, checksum
+   verified. Exit 0.
+2. `restore-test-aion-runtime.sh 20260920_063256_manual db` → **downloaded
+   from B2** (the real offsite leg, proving the previously-broken download
+   path now works), decrypted, restored into an isolated container:
+   **6/6 checks passed** — schema 7/7 canonical tables, 16/16 total tables
+   (matches production), 92 `executions` rows restored (most recent:
+   `exe_5eb37872...:awaiting_approval` — a real, recognizable execution
+   record, not just a row count), 16 `approvals` rows restored (most
+   recent: `apr_63a095b9...:pending`). Isolated container + all decrypted
+   files + throwaway keyring shredded and removed on exit; production
+   `aion-postgres-1` untouched throughout (`StartedAt` unchanged).
+3. Re-run through the **actual installed systemd unit**
+   (`systemctl start aion-backup-runtime-db.service`) → same result, exit
+   0 — confirms scheduled runs will behave identically to the manual test.
+4. Retention verified live: dry-run listed 48 stale `db/` entries (all
+   >415h old, from the retired Aug 31–Sep 2 legacy backups); pruning them
+   removed only those, leaving the 2 new stamps; `full/`'s 16 entries
+   (unrelated legacy Immich/config/n8n snapshots) confirmed **untouched**
+   before and after (`rclone lsf .../full/ | wc -l` → 16, unchanged).
+
+**Retention / encryption / schedule summary:**
+| | |
+|---|---|
+| Encryption | GPG RSA4096, recipient `1BDEDA892D92F447A4FC74A8EB3ECECDB9716729` ("AION Backups"); private key never on the persistent keyring (confirmed: `gpg --list-secret-keys` against `/root/.backup-secrets/gnupg` returns empty) |
+| Offsite destination | Backblaze B2, bucket `aion-prod-backups-ceoloo`, `db/` prefix |
+| Schedule | Hourly, `aion-backup-runtime-db.timer`, **enabled and live** |
+| Retention | 48h flat window on `db/` (long-term history is a design gap noted below — this module has no `full/`-equivalent daily tier yet) |
+| Last successful backup (as of this report) | `db/20260920_063539_verify2/` — real, verified, still within retention |
+| Last successful restore test | same session, 6/6 checks passed, real B2 download leg exercised |
+| Alerting | reuses the existing `notify()`/`alert_success`/`alert_failure` → ntfy.sh, **topic already configured from August** — this ran for real during testing (a real ntfy push fired on the successful backup). This is the pipeline's own pre-existing, already-approved notification path, separate from the NEW `aion-monitor` alert-destination decision in the next section. |
+
+**One real gap, not fixed this session:** this module only has an hourly
+`db/`-tier backup (48h retention) — there is no `full/`-tier long-term
+daily/weekly/monthly snapshot of `aion_data` yet, unlike the legacy
+system's GFS-retained `full/` tier. For a database this size (68MB) that's
+cheap to add later (a second daily timer + the existing `prune_gfs_prefix`
+function pointed at a new prefix, e.g. `full-aion-runtime/`, to avoid
+mixing with the legacy `full/` GFS bucket) — flagged as a small, clearly
+-scoped follow-up, not built this session to keep this change reviewable.

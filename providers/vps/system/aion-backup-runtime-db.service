@@ -1,0 +1,10 @@
+[Unit]
+Description=AION runtime (aion_data) hourly PostgreSQL backup
+OnFailure=aion-backup-alert@%n.service
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/aion-backup/bin/backup-aion-runtime.sh db
+TimeoutStartSec=600

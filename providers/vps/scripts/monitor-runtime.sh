@@ -43,7 +43,7 @@
 #                          (no external send) — this is a valid, honest
 #                          state, not an error, until a destination is
 #                          authorized.
-#   ALERT_FORMAT           slack (default) | raw — payload shape
+#   ALERT_FORMAT           slack (default) | ntfy | raw — payload shape
 #
 # Never prints secret values (there are none in this script's inputs beyond
 # the webhook URL itself, which is only ever used as a curl target, never
@@ -83,13 +83,32 @@ notify() {  # notify title body severity(warning|critical|info)
     log "warn" "no ALERT_WEBHOOK_URL configured — alert logged only, not delivered" "alert_undelivered" "{}"
     return 0
   fi
-  local payload
+  local ntfy_priority="default"
+  [ "${severity}" = "critical" ] && ntfy_priority="high"
+  local ok=1
   case "${ALERT_FORMAT}" in
-    slack) payload="$(jq -nc --arg t "${title}" --arg b "${body}" '{text: ($t + "\n" + $b)}')" ;;
-    raw)   payload="$(jq -nc --arg t "${title}" --arg b "${body}" --arg ts "${NOW_ISO}" '{title:$t, body:$b, timestamp:$ts}')" ;;
-    *)     payload="$(jq -nc --arg t "${title}" --arg b "${body}" '{text: ($t + "\n" + $b)}')" ;;
+    ntfy)
+      # ntfy.sh wants a plain-text body + Title/Priority headers, not JSON
+      # (same convention the existing /opt/aion-backup notify() uses).
+      curl -fsS --max-time 10 \
+        -H "Title: ${title}" -H "Priority: ${ntfy_priority}" \
+        -d "${body}" "${ALERT_WEBHOOK_URL}" >/dev/null 2>&1
+      ok=$?
+      ;;
+    raw)
+      curl -fsS --max-time 10 -H 'Content-Type: application/json' \
+        -d "$(jq -nc --arg t "${title}" --arg b "${body}" --arg ts "${NOW_ISO}" '{title:$t, body:$b, timestamp:$ts}')" \
+        "${ALERT_WEBHOOK_URL}" >/dev/null 2>&1
+      ok=$?
+      ;;
+    slack|*)
+      curl -fsS --max-time 10 -H 'Content-Type: application/json' \
+        -d "$(jq -nc --arg t "${title}" --arg b "${body}" '{text: ($t + "\n" + $b)}')" \
+        "${ALERT_WEBHOOK_URL}" >/dev/null 2>&1
+      ok=$?
+      ;;
   esac
-  if curl -fsS --max-time 10 -H 'Content-Type: application/json' -d "${payload}" "${ALERT_WEBHOOK_URL}" >/dev/null 2>&1; then
+  if [ "${ok}" = "0" ]; then
     log "info" "alert delivered" "alert_delivered" "{}"
   else
     log "error" "alert delivery FAILED (webhook unreachable/rejected)" "alert_delivery_failed" "{}"

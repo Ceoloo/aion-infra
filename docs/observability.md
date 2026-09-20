@@ -74,12 +74,13 @@ still-failing), and sends a recovery notice on return to health. Built
 — see [docs/audit-2026-09-20-vps-execution-readiness.md](audit-2026-09-20-vps-execution-readiness.md)
 and [runbook.md](runbook.md) "Runtime failure detection".
 
-No alert destination is wired by default (`ALERT_WEBHOOK_URL` unset) —
-findings are still detected, debounced, and logged to the systemd journal;
-delivery is opt-in once an operator authorizes a specific destination
-(Slack/Discord/generic webhook). This is a deliberate, honest default, not
-an oversight: log-only is a valid operating state during evaluation, not a
-disabled feature pretending to be enabled.
+Alert delivery started as log-only by design (no destination should be
+assumed authorized) and, as of 2026-09-20, is wired to the existing
+ntfy.sh channel the backup system (below) already uses — reused rather
+than standing up a new one, with the user's explicit sign-off. Delivery
+remains opt-in and swappable (`ALERT_WEBHOOK_URL`/`ALERT_FORMAT` in
+`/opt/aion/.env.monitor`); log-only was, and remains, a valid operating
+state on its own, not a disabled feature pretending to be enabled.
 
 ## What is deliberately not built
 

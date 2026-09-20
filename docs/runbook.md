@@ -185,15 +185,17 @@ journalctl -u aion-monitor.service -n 50 --no-pager
 systemctl start aion-monitor.service && journalctl -u aion-monitor.service -n 10 --no-pager
 ```
 
-Config: `/opt/aion/.env.monitor` (root 0600; see `.env.monitor.example` —
-thresholds + optional `ALERT_WEBHOOK_URL`). **No alert destination is wired
-by default** — until `ALERT_WEBHOOK_URL` is set, findings are detected,
-debounced, and logged to the journal only; nothing pages anyone. To wire
-one: set `ALERT_WEBHOOK_URL` (Slack-compatible JSON by default;
-`ALERT_FORMAT=raw` for a generic `{title,body,timestamp}` payload), then
-`systemctl restart aion-monitor.timer` is not even needed — the next poll
-picks up the new env file automatically (`EnvironmentFile=-` is re-read
-per invocation, since each run is a fresh `Type=oneshot` process).
+Config: `/opt/aion/.env.monitor` (root 0600; see `.env.monitor.example`).
+**Alert delivery is live as of 2026-09-20** — `ALERT_WEBHOOK_URL` points
+at the existing ntfy.sh topic already used by the backup system
+(`/root/.backup-secrets/ntfy.env`), reused rather than standing up a new
+destination (user-authorized). `ALERT_FORMAT=ntfy` sends a plain-text
+body with `Title`/`Priority` headers, matching the same convention
+`/opt/aion-backup`'s own `notify()` already uses. To point elsewhere
+instead: set `ALERT_WEBHOOK_URL` to a Slack/Discord/generic webhook and
+`ALERT_FORMAT=slack` (default, Slack-compatible JSON) or `raw`
+(`{title,body,timestamp}` JSON) — no restart needed, each poll is a fresh
+`Type=oneshot` process that re-reads the env file.
 
 It alerts on: container missing, stuck restarting, unhealthy, external
 `/health/ready` non-200, and its own inability to reach the Docker daemon
@@ -218,28 +220,47 @@ resolver — never re-implements dotenv parsing) and that JSON-shaped vars
 2026-09-14 incident: the bug wasn't that validation was hard, it's that
 nothing ran it.
 
-## Enable off-host backups (VPS — not active by default)
+## Off-host backups (VPS — LIVE, hourly, aion_data)
 
-`providers/vps/scripts/backup.sh` / `restore.sh` already exist and work;
-they need S3-compatible credentials, which nothing on the box has today.
+**Active as of 2026-09-20.** Reuses the existing, previously-verified
+Backblaze B2 + GPG + rclone pipeline from `/opt/aion-backup/` (built
+2026-08-11 for the retired legacy stack) rather than standing up new
+storage — no new credentials or recurring cost were needed. See
+`docs/audit-2026-09-20-followup-slices.md` for full evidence.
 
-1. Provision storage (Cloudflare R2 recommended — free egress, ~$0.015/GB-
-   month): dash.cloudflare.com → R2 → create bucket → Manage API Tokens →
-   token scoped to that bucket only (Object Read & Write). Endpoint is
-   `https://<account_id>.r2.cloudflarestorage.com`.
-2. `cp providers/vps/.env.backup.example /opt/aion/.env.backup && chmod 600
-   /opt/aion/.env.backup` — fill in `PGDUMP_URL`, `BACKUP_PASSPHRASE`
-   (generate with `openssl rand -base64 32`, store it OFF this box too),
-   `S3_ENDPOINT`/`S3_BUCKET`/`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`.
-3. Test once by hand: `cd /opt/aion && ./scripts/backup.sh`.
-4. Install the timer: copy `providers/vps/system/aion-backup.{service,timer}`
-   to `/etc/systemd/system/`, `systemctl daemon-reload && systemctl enable
-   --now aion-backup.timer`.
-5. **Prove restore works** (never skip this — a backup that's never been
-   restored is not a backup): `BACKUP_KEY=<latest object key> ./scripts/
-   restore.sh` — restores into an isolated, disposable container and
-   validates the 7 canonical tables, then tears itself down. Never touches
-   the live database.
+```bash
+# check schedule / last run
+systemctl list-timers aion-backup-runtime-db.timer
+systemctl status aion-backup-runtime-db.service
+journalctl -u aion-backup-runtime-db.service -n 30 --no-pager
+
+# manual run
+/opt/aion-backup/bin/backup-aion-runtime.sh db
+
+# list what's offsite
+rclone lsf b2:aion-prod-backups-ceoloo/db/ --dirs-only
+
+# restore drill into an ISOLATED, disposable container (never touches
+# production; downloads the real offsite object, decrypts with the
+# OFFLINE key into a throwaway keyring, verifies schema + representative
+# execution/approval rows, tears itself down)
+/opt/aion-backup/bin/restore-test-aion-runtime.sh <stamp> db
+```
+
+Retention: 48h flat window on `db/`, pruned automatically at the end of
+every run (scoped deliberately to this module's prefix only — does not
+touch the legacy `full/` GFS archive, which belongs to the unrelated
+Immich/config/n8n backup modules in the same directory). There is
+currently no long-term (`full/`-tier) daily/weekly/monthly snapshot of
+`aion_data` — a small, separately-scoped follow-up if longer retention is
+wanted later.
+
+**The S3-compatible `providers/vps/scripts/backup.sh`/`restore.sh` +
+Cloudflare R2 path from the original audit (PR #12) is no longer the
+recommended route** — it would have stood up a second, redundant, paid
+storage destination when an approved, working one already existed. Left
+in the repo as a portable reference for a different environment (e.g. a
+host with no pre-existing B2/GPG setup), not as the active VPS path.
 
 ## Review stale/aged approval gates (read-only)
 
