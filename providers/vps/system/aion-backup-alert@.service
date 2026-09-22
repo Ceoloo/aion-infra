@@ -1,0 +1,6 @@
+[Unit]
+Description=AION backup failure alert for %i
+
+[Service]
+Type=oneshot
+ExecStart=/opt/aion-backup/bin/alert-on-failure.sh %i

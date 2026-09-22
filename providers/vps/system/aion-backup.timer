@@ -1,0 +1,12 @@
+[Unit]
+Description=Run aion-backup.service daily (aion-infra#14)
+
+[Timer]
+# 03:10 UTC — after Postgres's own routine activity, ahead of the 03:30/04:00
+# host maintenance cron jobs already on this box (e2scrub, image-hygiene).
+OnCalendar=*-*-* 03:10:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

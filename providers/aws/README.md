@@ -1,5 +1,13 @@
 # AWS deployment profile
 
+> **STATUS (2026-09-20): NOT DEPLOYED FROM THIS REPO AND NOT SUPPORTED for the current runtime image until the configuration below is wired.**
+> No workflow in this repo applies this profile. Whether an environment was ever created by hand is not
+> knowable from the repo. The runtime now refuses to start in `AION_ENVIRONMENT=production` without an explicit CRM backend choice (`GHL_BACKEND=live` + `GHL_API_KEY`/`GHL_LOCATION_ID`), and
+> requires the identity plane (`AION_AUTH_MODE=required` + `AION_GATEWAY_API_KEYS`). This profile wires **neither** (it passes only `AION_ENVIRONMENT`, DB URLs and release metadata), so a production deployment of a current image would not start.
+> Before using it: add secret-backed `GHL_API_KEY`, `GHL_LOCATION_ID`, `GHL_BACKEND=live`, `AION_GATEWAY_API_KEYS` (and `AION_AUTH_MODE=required`) to the runtime service, then boot-check the image with that configuration.
+> Staging (`AION_ENVIRONMENT=staging`) also needs the identity keys (auth is required off-local); only its CRM backend keeps the legacy fallback (no credentials → fake), which is not a production-equivalent test.
+
+
 **The AION → AWS mapping, as a minimal reference profile.** It proves the AION
 workload runs on AWS with **no application changes** — the same runtime image,
 the same aion-data migrations, the same [deployment

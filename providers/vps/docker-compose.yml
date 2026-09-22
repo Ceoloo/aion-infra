@@ -46,6 +46,8 @@ services:
       GHL_API_KEY: ${GHL_API_KEY:-}
       GHL_LOCATION_ID: ${GHL_LOCATION_ID:-}
       GHL_API_VERSION: ${GHL_API_VERSION:-2021-07-28}
+      # Explicit CRM backend (live|fake). Production must set live; unset falls back to inferred-live with a warning (see aion-runtime backend-policy).
+      GHL_BACKEND: ${GHL_BACKEND:-}
     # Internal only — never publish 8080 on the host. Traefik reaches us via
     # the external edge network + Docker labels.
     expose:
@@ -57,6 +59,19 @@ services:
       start_period: 10s
       retries: 3
     stop_grace_period: 30s
+    # Sized from measured baseline (2026-09-20, idle: ~23MiB RSS, 0% CPU) with
+    # generous headroom, not a load test (aion-infra#14). Tighten or raise
+    # once real traffic is observed.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - internal
       - traefik
@@ -117,6 +132,18 @@ services:
       start_period: 10s
       retries: 3
     stop_grace_period: 30s
+    # Sized from measured baseline (2026-09-20, idle: ~32MiB RSS, 0% CPU) with
+    # generous headroom, not a load test (aion-infra#14).
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - internal
       - traefik
@@ -151,7 +178,26 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    # Previously unset (defaults to Docker's own 10s). Postgres's own SIGTERM
+    # handling is a "Fast Shutdown" (clean checkpoint, forces clients off —
+    # safe, not corrupting, just not "Smart" graceful) — 60s gives it real
+    # headroom to complete a checkpoint under load, at negligible cost since
+    # a stop only waits this long if shutdown is actually still in progress.
+    stop_grace_period: 60s
     networks: [internal]
+    # Sized from measured baseline (2026-09-20, idle: ~33MiB RSS, 0% CPU) with
+    # generous headroom for connection/shared-buffer growth, not a load test
+    # (aion-infra#14).
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ── Legacy Caddy (only when the host has NO Traefik). Profile: caddy ──────
   # Do not enable this profile next to an existing Traefik on :80/:443.

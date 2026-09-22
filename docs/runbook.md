@@ -134,6 +134,159 @@ validate, then cut over deliberately. See [backup-recovery.md](backup-recovery.m
    output.
 3. Fix forward and re-deploy, or **Rollback runtime** to the last good SHA.
 
+## Handle a runtime crash-loop after editing `.env` (VPS)
+
+If `aion-runtime` restarts repeatedly with `config_invalid` in its logs:
+
+1. Diagnose without printing secrets — compare lengths/JSON-validity, not
+   values:
+   ```bash
+   cd /opt/aion
+   docker compose config --format json | python3 -c \
+     "import json,sys; v=json.load(sys.stdin)['services']['aion-runtime']['environment'].get('AION_GATEWAY_API_KEYS',''); print(len(v)); json.loads(v)"
+   ```
+   If this parses cleanly but the container is still crash-looping, the
+   **container's frozen creation-time env is stale** — `.env` was fixed
+   after the container was created, but the container was never recreated
+   to pick it up. Confirm via
+   `docker inspect aion-aion-runtime-1 --format '{{.Created}}'` vs
+   `stat -c %y .env`.
+2. Fix: `docker compose up -d aion-runtime` (recreates only this
+   container from the current `.env`; no image change, no migration).
+   Prefer `sudo -E ./scripts/deploy.sh` when also rolling an image, since
+   it health-gates and auto-rolls-back — a bare `docker compose up` does
+   not.
+3. Validate: `docker inspect --format '{{.State.Health.Status}}'` reaches
+   `healthy`; `curl $AION_RUNTIME_URL/health/ready` returns 200; restart
+   count stops climbing.
+4. This class of bug (edit `.env` → forget to redeploy) is why any PR that
+   adds/changes a required env var (e.g. the 2026-09-14 "Track A" PR that
+   added `AION_GATEWAY_API_KEYS`) must end with an actual redeploy step
+   confirmed on the box, not just a corrected file. Consider adding
+   container-restart-count alerting so a repeat doesn't run silently for
+   days — see `docs/audit-2026-09-20-vps-execution-readiness.md`.
+
+## Runtime failure detection (VPS — aion-monitor)
+
+`providers/vps/scripts/monitor-runtime.sh` runs on the HOST via
+`aion-monitor.timer` (every 60s), independent of `aion-runtime` itself —
+it checks container state (`docker inspect`) and the external
+`/health/ready` endpoint, so it still works when the runtime is fully down.
+Built after the 2026-09-14 6-day silent outage (aion-infra#12); see
+`docs/audit-2026-09-20-vps-execution-readiness.md` and
+`docs/audit-2026-09-20-followup-slices.md`.
+
+```bash
+# check it's running and see recent findings
+systemctl status aion-monitor.timer
+journalctl -u aion-monitor.service -n 50 --no-pager
+
+# one-off manual run (e.g. right after a deploy)
+systemctl start aion-monitor.service && journalctl -u aion-monitor.service -n 10 --no-pager
+```
+
+Config: `/opt/aion/.env.monitor` (root 0600; see `.env.monitor.example`).
+**Alert delivery is live as of 2026-09-20** — `ALERT_WEBHOOK_URL` points
+at the existing ntfy.sh topic already used by the backup system
+(`/root/.backup-secrets/ntfy.env`), reused rather than standing up a new
+destination (user-authorized). `ALERT_FORMAT=ntfy` sends a plain-text
+body with `Title`/`Priority` headers, matching the same convention
+`/opt/aion-backup`'s own `notify()` already uses. To point elsewhere
+instead: set `ALERT_WEBHOOK_URL` to a Slack/Discord/generic webhook and
+`ALERT_FORMAT=slack` (default, Slack-compatible JSON) or `raw`
+(`{title,body,timestamp}` JSON) — no restart needed, each poll is a fresh
+`Type=oneshot` process that re-reads the env file.
+
+It alerts on: container missing, stuck restarting, unhealthy, external
+`/health/ready` non-200, and its own inability to reach the Docker daemon
+(reported distinctly, never confused with "target is fine"). It does NOT
+alert on a single blip — `BAD_THRESHOLD` consecutive bad polls required
+(default 3) — and a container recreate resets its restart-count baseline
+rather than treating a fresh healthy instance as still-failing.
+
+## Validate `.env` before recreating a container (VPS)
+
+`providers/vps/scripts/validate-env.sh` is already a `deploy.sh` preflight
+— run it manually after any hand-edit of `/opt/aion/.env` too, before
+`docker compose up`:
+
+```bash
+cd /opt/aion && ./scripts/validate-env.sh
+```
+
+Checks every `${VAR:?...}` required var is non-empty (via Compose's own
+resolver — never re-implements dotenv parsing) and that JSON-shaped vars
+(`AION_GATEWAY_API_KEYS`) actually parse. This is the direct fix for the
+2026-09-14 incident: the bug wasn't that validation was hard, it's that
+nothing ran it.
+
+## Off-host backups (VPS — LIVE, hourly, aion_data)
+
+**Active as of 2026-09-20.** Reuses the existing, previously-verified
+Backblaze B2 + GPG + rclone pipeline from `/opt/aion-backup/` (built
+2026-08-11 for the retired legacy stack) rather than standing up new
+storage — no new credentials or recurring cost were needed. See
+`docs/audit-2026-09-20-followup-slices.md` for full evidence.
+
+```bash
+# check schedule / last run
+systemctl list-timers aion-backup-runtime-db.timer
+systemctl status aion-backup-runtime-db.service
+journalctl -u aion-backup-runtime-db.service -n 30 --no-pager
+
+# manual run
+/opt/aion-backup/bin/backup-aion-runtime.sh db
+
+# list what's offsite
+rclone lsf b2:aion-prod-backups-ceoloo/db/ --dirs-only
+
+# restore drill into an ISOLATED, disposable container (never touches
+# production; downloads the real offsite object, decrypts with the
+# OFFLINE key into a throwaway keyring, verifies schema + representative
+# execution/approval rows, tears itself down)
+/opt/aion-backup/bin/restore-test-aion-runtime.sh <stamp> db
+```
+
+Retention: 48h flat window on `db/`, pruned automatically at the end of
+every run (scoped deliberately to this module's prefix only — does not
+touch the legacy `full/` GFS archive, which belongs to the unrelated
+Immich/config/n8n backup modules in the same directory). There is
+currently no long-term (`full/`-tier) daily/weekly/monthly snapshot of
+`aion_data` — a small, separately-scoped follow-up if longer retention is
+wanted later.
+
+**The S3-compatible `providers/vps/scripts/backup.sh`/`restore.sh` +
+Cloudflare R2 path from the original audit (PR #12) is no longer the
+recommended route** — it would have stood up a second, redundant, paid
+storage destination when an approved, working one already existed. Left
+in the repo as a portable reference for a different environment (e.g. a
+host with no pre-existing B2/GPG setup), not as the active VPS path.
+
+## Recovery coverage, synthetic-data controls, GHL acceptance
+- What a DB restore does **not** recover, the out-of-band kit, and the prepared (not installed) config backup:
+  [recovery-kit.md](recovery-kit.md).
+- Synthetic proof records vs business-value reporting (guard PR, view fix SQL — not applied): [synthetic-data-controls.md](synthetic-data-controls.md).
+- AIO-17 acceptance (fixtures done; live blocked on a test tenant): [ghl-aio17-acceptance-plan.md](ghl-aio17-acceptance-plan.md).
+- Executed resource/logging rollout evidence and limitations: [rollout-2026-09-20.md](rollout-2026-09-20.md).
+- Exposure review of customer identifiers/credentials in the public repos: [exposure-review-2026-09-20.md](exposure-review-2026-09-20.md).
+- Stale approvals — evidence and proposed audited disposition: [stale-approval-disposition.md](stale-approval-disposition.md).
+
+## Review stale/aged approval gates (read-only)
+
+```bash
+STALE_HOURS=24 providers/vps/scripts/report-stale-approvals.sh
+```
+
+Lists `approvals` still `pending` past the age threshold and any
+`executions` stuck `awaiting_approval`. **Never auto-approves, rejects, or
+replays anything** — resolve manually, and only after actually reviewing
+each approval's `command_snapshot`:
+
+```bash
+docker exec -it aion-postgres-1 psql -U postgres -d aion_data -c \
+  "UPDATE approvals SET status='rejected', decided_by='<operator>', decided_at=now(), note='<why>' WHERE approval_id='<id>'"
+```
+
 ## Human database access (break-glass)
 
 Exceptional only (§38). Prefer read-only, authenticated, logged:

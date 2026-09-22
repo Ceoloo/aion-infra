@@ -56,15 +56,23 @@ providers/vps/
 ├── README.md
 ├── docker-compose.yml     aion-runtime (+ Traefik labels) + optional postgres
 ├── .env.example           secrets contract (copy to root-owned 0600 /opt/aion/.env)
+├── .env.monitor.example   aion-monitor config (thresholds + alert webhook)
+├── .env.backup.example    aion-backup config (S3-compatible creds)
 ├── traefik/
 │   └── aion-runtime.yml.example   optional file-provider snippet
 ├── legacy/
 │   └── Caddyfile          only with AION_EDGE=caddy (no Traefik on host)
 ├── system/
-│   └── init-roles.sh
+│   ├── init-roles.sh
+│   ├── aion-monitor.service / .timer   runtime failure detection (60s)
+│   └── aion-backup.service / .timer    off-host encrypted backup (daily)
 └── scripts/
     ├── bootstrap-server.sh
-    ├── deploy.sh            pull → migrate → roll → readiness → smoke
+    ├── deploy.sh                    pull → validate-env → migrate → roll → readiness → smoke
+    ├── validate-env.sh              preflight: required + JSON-shaped .env vars
+    ├── monitor-runtime.sh           failure detection (container + external health)
+    ├── report-stale-approvals.sh    read-only: aged pending/awaiting_approval rows
+    ├── report-unclassified-missions.sh  read-only: missions awaiting KPI classification (needs the reconciliation SQL)
     ├── backup.sh
     └── restore.sh
 ```
@@ -160,7 +168,18 @@ CI drives deploys over SSH — see
 ## Backups (Mode A)
 
 `scripts/backup.sh` / `scripts/restore.sh` — encrypted off-host dump; restore
-into an isolated target. Mode B uses the managed provider's PITR.
+into an isolated target. Mode B uses the managed provider's PITR. Not active
+by default (no storage credentials exist until provisioned) — see
+[docs/runbook.md](../../docs/runbook.md) "Enable off-host backups".
+
+## Runtime failure detection
+
+`scripts/monitor-runtime.sh` + `system/aion-monitor.{service,timer}` — a
+60s host-level timer that checks `aion-runtime` container state and the
+external `/health/ready` endpoint, independent of the runtime being up.
+Built after the 2026-09-14 outage where the container crash-looped for ~6
+days with no alert. See [docs/runbook.md](../../docs/runbook.md) "Runtime
+failure detection" and [docs/observability.md](../../docs/observability.md).
 
 ## Hardening
 

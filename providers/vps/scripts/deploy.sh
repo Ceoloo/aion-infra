@@ -39,8 +39,38 @@ if [ -n "${DEPLOY_IMAGE:-}" ]; then
   echo "[deploy] .env updated from CI: AION_IMAGE=${DEPLOY_IMAGE} GIT_SHA=${DEPLOY_GIT_SHA:-<unchanged>}"
 fi
 
-# Load config for this script (compose reads .env itself for interpolation).
-set -a; . ./.env; set +a
+# .env is the single source of truth: drop any same-named variable the caller exported (Compose gives the shell environment
+# precedence over .env, so an inherited AION_GATEWAY_API_KEYS/AION_IMAGE/... would silently win for validation and every compose call).
+while IFS= read -r _k; do unset "${_k}" 2>/dev/null || true; done < <(grep -oE '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' .env | sed -E 's/^[[:space:]]*(export[[:space:]]+)?//; s/=$//')
+
+# Preflight FIRST: every ${VAR:?...} required var + JSON-shaped vars (see
+# scripts/validate-env.sh — the fix for the 2026-09-14 incident, aion-infra#12/#13).
+# It uses Compose's own parser, so it must run before anything shell-parses .env.
+# Runs before any pull/migrate/roll; never prints values.
+echo "[deploy] validating .env (required vars + JSON-shaped vars)"
+"$(dirname "$0")/validate-env.sh"
+
+# This script's own scalar settings are READ from .env as literal KEY=value text —
+# never `source`d (Compose's .env syntax is not shell: a JSON token or a value with
+# $ ( ) ` would be expanded or executed as root) and never exported (an exported,
+# shell-mangled copy would take precedence over Compose's own .env value). Compose
+# reads .env itself for everything the containers get. A key present in .env wins
+# over the caller's environment, as before.
+env_scalar() {
+  local key="$1" line v
+  line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" .env | tail -n1)" || return 0
+  v="${line#*=}"
+  case "${v}" in
+    \"*\") v="${v#\"}"; v="${v%\"}" ;;
+    \'*\') v="${v#\'}"; v="${v%\'}" ;;
+  esac
+  printf -v "${key}" '%s' "${v}"
+}
+for _k in MIGRATION_DATABASE_URL AION_DOMAIN AION_IMAGE AION_EDGE AION_TRAEFIK_NETWORK \
+          AION_TRAEFIK_NETWORK_EXTERNAL AION_LOCAL_DB AION_ENVIRONMENT DATABASE_SSL \
+          AION_SKIP_PUBLIC_PROBE; do
+  env_scalar "${_k}"
+done
 : "${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}"
 : "${AION_DOMAIN:?set AION_DOMAIN in .env}"
 : "${AION_IMAGE:?set AION_IMAGE in .env}"

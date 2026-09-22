@@ -12,7 +12,7 @@ DEPLOY_USER="${DEPLOY_USER:-aion}"
 
 echo "[bootstrap] base packages + automatic security updates"
 apt-get update -y
-apt-get install -y --no-install-recommends ca-certificates curl ufw unattended-upgrades
+apt-get install -y --no-install-recommends ca-certificates curl jq ufw unattended-upgrades
 dpkg-reconfigure -f noninteractive unattended-upgrades || true
 
 echo "[bootstrap] Docker (official convenience script is acceptable here, but we"

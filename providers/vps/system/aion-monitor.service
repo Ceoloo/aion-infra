@@ -1,0 +1,31 @@
+[Unit]
+Description=AION runtime failure detection (aion-infra#12/#14)
+# Deliberately no Requires=/After= on docker.service beyond ordering — this
+# monitor's whole purpose is to detect docker/aion-runtime being broken, so
+# it must still be schedulable when the target is down. It only needs the
+# Docker socket to exist to attempt an observation; if it can't reach it,
+# monitor-runtime.sh itself reports that as an "observe_failed" finding
+# rather than failing silently.
+After=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+# Separate from /opt/aion/.env (deploy/runtime secrets) — this file holds
+# only monitor thresholds + an optional alert webhook URL. Root 0600.
+# Not required to exist: EnvironmentFile with '-' prefix is optional, so a
+# fresh install runs in log-only mode until the file is created.
+EnvironmentFile=-/opt/aion/.env.monitor
+ExecStart=/opt/aion/scripts/monitor-runtime.sh
+User=root
+# StateDirectory creates/owns /var/lib/aion-monitor (0700) for the state
+# file — matches the script's default STATE_FILE path.
+StateDirectory=aion-monitor
+StateDirectoryMode=0700
+# Hardening: this unit only needs to read the Docker socket, make outbound
+# HTTPS calls, and write its own state dir.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/aion-monitor
+PrivateTmp=true

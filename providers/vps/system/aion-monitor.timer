@@ -1,0 +1,11 @@
+[Unit]
+Description=Run aion-monitor.service on a short interval (aion-infra#12/#14)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=60s
+AccuracySec=5s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
