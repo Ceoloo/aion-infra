@@ -204,6 +204,40 @@ alert on a single blip — `BAD_THRESHOLD` consecutive bad polls required
 (default 3) — and a container recreate resets its restart-count baseline
 rather than treating a fresh healthy instance as still-failing.
 
+## Recovery ownership & escalation (VPS)
+
+**Alert recipient:** Loo (system owner/operator) — the sole recipient today,
+via the ntfy.sh topic in `/root/.backup-secrets/ntfy.env` (same topic the
+backup system uses; a push notification to any device subscribed to it).
+**Acknowledgment:** manual — Loo checks the ntfy notification and confirms
+via this channel or by checking `curl .../health/ready` directly. There is
+no second responder or on-call rotation; this is a single-operator system.
+**Escalation:** while an incident stays open, `aion-monitor` re-sends the
+FAILING alert every `RE_ALERT_SECONDS` (default 1800s/30min). Recovery stops
+re-alerting; manual acknowledgment does not. This is the only escalation
+mechanism that exists today (no secondary contact, no paging service).
+
+**Initial SLA targets** (2026-09-22): detection within 5 minutes of a real
+failure; operator acknowledgment within 15 minutes of the alert. Detection
+is bounded by `BAD_THRESHOLD` (3) × the 60s poll interval ≈ 3 minutes worst
+case — comfortably inside the 5-minute target (measured live: 2m51s from a
+real `docker stop` to alert delivery, see `docs/evidence-*.md`).
+Acknowledgment is a process commitment, not automated.
+
+**Rollback (VPS, manual):**
+```bash
+cd /opt/aion || exit 1
+sudo env \
+  DEPLOY_IMAGE="ghcr.io/ceoloo/aion-runtime@sha256:<prev-digest>" \
+  DEPLOY_GIT_SHA="<prev-40hex-sha>" \
+  ./scripts/deploy.sh
+```
+`deploy.sh` also auto-rolls-back on its own if the NEW image fails readiness
+or smoke during a deploy — this manual form is for rolling back an
+already-serving revision after the fact. Last-known-good digests on record:
+- **Current (2026-09-22):** `sha256:e3fef42f972b708990330bc6102b584e5575457314e2480af4c0cdd5241a60b0` (git `10de06635f18c83be38e183b20b06a1b0c092fb3`)
+- **Previous (2026-09-20–22):** `sha256:39b423175d03423e90918772541e8b9830d8a1ee980050ae380165d04ef11c2c` (git `eb36cfb63b33587fc79840ba064d63be92106892`)
+
 ## Validate `.env` before recreating a container (VPS)
 
 `providers/vps/scripts/validate-env.sh` is already a `deploy.sh` preflight
