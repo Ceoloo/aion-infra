@@ -213,9 +213,9 @@ backup system uses; a push notification to any device subscribed to it).
 via this channel or by checking `curl .../health/ready` directly. There is
 no second responder or on-call rotation; this is a single-operator system.
 **Escalation:** while an incident stays open, `aion-monitor` re-sends the
-FAILING alert every `RE_ALERT_SECONDS` (default 1800s/30min) until it
-recovers or is acknowledged — this is the only escalation mechanism that
-exists today (no secondary contact, no paging service).
+FAILING alert every `RE_ALERT_SECONDS` (default 1800s/30min). Recovery stops
+re-alerting; manual acknowledgment does not. This is the only escalation
+mechanism that exists today (no secondary contact, no paging service).
 
 **Initial SLA targets** (2026-09-22): detection within 5 minutes of a real
 failure; operator acknowledgment within 15 minutes of the alert. Detection
@@ -226,8 +226,11 @@ Acknowledgment is a process commitment, not automated.
 
 **Rollback (VPS, manual):**
 ```bash
-cd /opt/aion && DEPLOY_IMAGE="ghcr.io/ceoloo/aion-runtime@sha256:<prev-digest>" \
-  DEPLOY_GIT_SHA="<prev-40hex-sha>" sudo -E scripts/deploy.sh
+cd /opt/aion || exit 1
+sudo env \
+  DEPLOY_IMAGE="ghcr.io/ceoloo/aion-runtime@sha256:<prev-digest>" \
+  DEPLOY_GIT_SHA="<prev-40hex-sha>" \
+  ./scripts/deploy.sh
 ```
 `deploy.sh` also auto-rolls-back on its own if the NEW image fails readiness
 or smoke during a deploy — this manual form is for rolling back an
