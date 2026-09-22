@@ -52,10 +52,10 @@ Total container downtime: 08:20:25 → 08:24:08 (~3m43s), fully controlled.
 | Monitor's next poll | 08:26:31 | logs `container_recreated` (info, not alert): `previous_created:"2026-09-22T08:02:56.189953871Z"`, `new_created:"2026-09-22T08:25:57.480279297Z"` |
 | Result | 08:26:31 | both checks immediately `ok` — **zero alerts fired** for the planned recreate |
 
-Confirms the monitor correctly distinguishes a planned recreate (new
-`Created` timestamp → baseline reset) from a crash loop (same instance,
-`RestartCount` climbing — the `RESTART_JUMP_THRESHOLD` path, not exercised
-today since this was a clean recreate, not a crash).
+Confirms the tested planned-recreate behavior: a new `Created` timestamp
+resets the restart baseline without firing an alert. Same-instance crash-loop
+detection through the `RESTART_JUMP_THRESHOLD` path remains unverified; this
+test did not exercise that path.
 
 **Readiness and digest after recreate:**
 ```json
