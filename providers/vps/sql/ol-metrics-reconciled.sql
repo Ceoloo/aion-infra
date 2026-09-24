@@ -1,4 +1,4 @@
--- RECONCILED KPI / PROVENANCE CHANGE — PROPOSED, NOT APPLIED to production (needs owner approval).
+-- RECONCILED KPI / PROVENANCE CHANGE — applied to production 2026-09-24 on owner request.
 -- Purpose: business-value reporting counts a record ONLY if it belongs to a mission that a person explicitly classified
 -- 'production'. Everything else — validation runs, uncertain early missions (left unclassified), synthetic proofs, any future record — is
 -- excluded BY DEFAULT, independent of naming, tenant id, metadata flags, or whether a mission row exists.
@@ -81,12 +81,12 @@ REVOKE ALL ON FUNCTION ol_metrics.classify_mission(text,text,text,text) FROM PUB
 INSERT INTO ol_metrics.mission_classification (mission_id, data_class, reason, classified_by) SELECT v.mission_id, v.data_class, v.reason, 'PROPOSED by audit 2026-09-20 from Console flags (asserted, not an authenticated person)'
 FROM (VALUES
   ('msn_648d3df8-43f7-422f-b457-4f0bb63291f3','production','Console-launched OL-001 mission flagged productionEconomic=true, synthetic=false (2026-09-11). 13 executions, several failed. Owner to confirm it is a real lead attempt.'),
-  ('msn_0e3c5c21-6bd4-4858-9232-032a399932d9','production','Console-launched OL-001 mission, launchMode=ol001_production, missionOrdinal 1, productionEconomic=true, synthetic=false (2026-09-12). One R2 approval still pending.'),
+  ('msn_0e3c5c21-6bd4-4858-9232-032a399932d9','production','Console-launched OL-001 mission, launchMode=ol001_production, missionOrdinal 1, productionEconomic=true, synthetic=false (2026-09-12). Its one R2 approval (apr_63a095b9) was rejected as SUPERSEDED 2026-09-22.'),
   ('msn_9eedcb95-45f5-457a-9680-9b14da913716','validation','pre_ol_validation cohort; Console flags productionEconomic=false (2026-09-08 pre-launch validation run).'),
   ('msn_db405716-0b9d-4823-8dc3-565c8e4689dd','validation','pre_ol_validation cohort; Console flags productionEconomic=false (2026-09-08 pre-launch validation run).'),
-  ('msn_30fd4f95-6e33-4a6f-aab4-6524cdbf44ad','validation','pre_ol_validation cohort; Console flags productionEconomic=false (2026-09-08); one execution still awaiting approval.'),
+  ('msn_30fd4f95-6e33-4a6f-aab4-6524cdbf44ad','validation','pre_ol_validation cohort; Console flags productionEconomic=false (2026-09-08); approval for its gated execution was rejected 2026-09-22.'),
   ('msn_eeb22b82-79cc-4f76-89f2-f430798b6a3c','validation','pre_ol_validation cohort; Console flags productionEconomic=false (2026-09-08 pre-launch validation run).'),
-  ('msn_59c5efb6-d9eb-47ab-a70d-15607728f002','validation','pre_ol_validation cohort; Console flags productionEconomic=false (2026-09-08); one execution still awaiting approval.')
+  ('msn_59c5efb6-d9eb-47ab-a70d-15607728f002','validation','pre_ol_validation cohort; Console flags productionEconomic=false (2026-09-08); approval for its gated execution was rejected 2026-09-22.')
 ) AS v(mission_id, data_class, reason)
 ON CONFLICT (mission_id) DO NOTHING;   -- re-apply after a rollback keeps any decision already recorded
 
