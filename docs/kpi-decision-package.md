@@ -1,6 +1,8 @@
 # KPI reporting — decision package (2026-09-20)
 
-**The SQL is NOT applied.** `providers/vps/sql/ol-metrics-reconciled.sql` (+ `-rollback.sql`) was extended this pass and tested on a scratch restore of production
+**Applied to production 2026-09-24 20:02Z** on the owner's request, after a fresh dry-run on a scratch restore (cohort_kpis 10 → 2, re-apply
+idempotent, rollback restores the prior live view definitions). The 7 seeded classifications still carry "PROPOSED by audit" as `classified_by`;
+the three missions in §1 remain unclassified until the owner decides. Original note: `providers/vps/sql/ol-metrics-reconciled.sql` (+ `-rollback.sql`) was extended this pass and tested on a scratch restore of production
 (a copy: production data and ACLs, isolated container; production untouched). Approving it has one operational consequence — read §5 first.
 
 ## 1. Classification evidence for the three unflagged missions
