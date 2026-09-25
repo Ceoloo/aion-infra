@@ -74,4 +74,4 @@ echo "  - CI SSHes as ${DEPLOY_USER} and runs: sudo -n /opt/aion/scripts/deploy.
 echo "  - OPS-001: this host should already run Traefik on :80/:443. Do NOT install Caddy beside it."
 echo "  - Join Traefik's Docker network via AION_TRAEFIK_NETWORK in .env (see .env.example)."
 echo "  - Postgres (Mode A) binds to 127.0.0.1 only; never open 5432 in ufw."
-echo "  - Prefer hostname runtime.aionsystems.ai (stable) over the Hostinger machine FQDN."
+echo "  - AION_DOMAIN: the Hostinger machine FQDN is bound to this server; a recovery changes it (docs/recovery-kit.md)."

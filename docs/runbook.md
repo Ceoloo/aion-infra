@@ -56,7 +56,7 @@ URL="${URL}" scripts/health-check.sh          # mints an identity token via gclo
 Non-destructive live+ready+CORS/env checklist (no deploy):
 
 ```bash
-URL=https://runtime.aionsystems.ai \
+URL=https://runtime.srv1655818.hstgr.cloud \
   CHECK_SERVICES=1 \
   CORS_ORIGIN=https://aion-operator-console.vercel.app \
   scripts/verify-p0-runtime-readiness.sh

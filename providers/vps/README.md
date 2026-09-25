@@ -9,7 +9,7 @@ running the **same runtime image** and the **same aion-data migrations**.
 ## OPS-001 topology (canonical)
 
 ```
-DNS ──▶ runtime.<domain>          e.g. runtime.aionsystems.ai
+DNS ──▶ runtime.<domain>          production: runtime.srv1655818.hstgr.cloud
           │
           ▼
        Traefik :443               (host edge — already on this VPS)
@@ -21,9 +21,10 @@ DNS ──▶ runtime.<domain>          e.g. runtime.aionsystems.ai
        PostgreSQL                 (Mode A local or Mode B managed — never public)
 ```
 
-Prefer a **stable, provider-independent hostname** (`runtime.aionsystems.ai`) over
-a Hostinger machine FQDN so the Operator Console keeps one logical endpoint if
-the Runtime later moves.
+Production uses the free Hostinger machine FQDN (`runtime.srv1655818.hstgr.cloud`) by owner decision
+(2026-09-25; AION owns no domain). That name is bound to the server, so moving or recovering
+the Runtime changes its URL — follow "Runtime hostname change" in `docs/recovery-kit.md`.
+A domain AION owns would remove that step.
 
 **Do not run Caddy next to Traefik.** One edge layer only. Legacy Caddy remains
 available as compose profile `caddy` for greenfield hosts without Traefik.
@@ -41,8 +42,8 @@ The Runtime never publishes `:8080`. Traefik reaches it over this network by the
 Then:
 
 ```
-Vercel Operator Console
-  └─ VITE_AION_RUNTIME_URL=https://runtime.aionsystems.ai
+Vercel Operator Console (server-side BFF proxy)
+  └─ RUNTIME_URL=https://runtime.srv1655818.hstgr.cloud
 ```
 
 `VITE_AION_TENANT_ID` / `VITE_AION_OPERATOR_ID` are **frontend hints only**.
@@ -117,7 +118,7 @@ AION_LOCAL_DB=1 ./scripts/deploy.sh
    digest-pinned, boot-certified release image, never a tag, `:latest`, or
    `main`; `deploy-vps.yml` fills this in. **Track A:** pin a Runtime tip from
    `main` at/after identity+durability (ADR-005), not only
-   `execution-platform-v0.2.2`. `AION_DOMAIN=runtime.aionsystems.ai`,
+   `execution-platform-v0.2.2`. `AION_DOMAIN=runtime.srv1655818.hstgr.cloud` (production),
    Traefik entrypoint / cert resolver matching the host). Set
    `AION_AUTH_MODE=required` and a real `AION_GATEWAY_API_KEYS` JSON array
    (placeholders in `.env.example`).
@@ -126,11 +127,11 @@ AION_LOCAL_DB=1 ./scripts/deploy.sh
    `network_mode: host` Traefik, `deploy.sh` creates the bridge — no manual
    `docker network create` needed.
 3. Runtime stays on the internal + edge networks — **do not** publish `:8080`.
-4. Point DNS `A`/`AAAA` for `runtime.aionsystems.ai` at the VPS.
+4. Make sure `AION_DOMAIN` resolves to the VPS (the Hostinger FQDN does automatically; a custom domain needs an `A`/`AAAA` record).
 5. `cd /opt/aion && ./scripts/deploy.sh` (or GitHub `deploy-vps.yml`).
 6. Verify (non-destructive; preferred overnight / P0 gate):
    ```bash
-   URL=https://runtime.aionsystems.ai \
+   URL=https://runtime.srv1655818.hstgr.cloud \
      CHECK_SERVICES=1 \
      CORS_ORIGIN=https://aion-operator-console.vercel.app \
      ../../scripts/verify-p0-runtime-readiness.sh
@@ -140,7 +141,7 @@ AION_LOCAL_DB=1 ./scripts/deploy.sh
    [docs/p0-overnight-readiness.md](../../docs/p0-overnight-readiness.md).
 7. Configure GitHub Environment secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 8. **Only then** create the Vercel `aion-operator-console` project with
-   `VITE_AION_RUNTIME_URL=https://runtime.aionsystems.ai`, set `AION_CORS_ORIGINS`
+   `RUNTIME_URL=https://runtime.srv1655818.hstgr.cloud` (server-side BFF proxy target), set `AION_CORS_ORIGINS`
    to that Vercel origin, and recreate the Runtime container so Traefik picks up
    the `aion-cors` middleware. Preflight check (include PATCH — mission close):
    `curl -i -X OPTIONS https://runtime…/v1/missions -H 'Origin: <vercel origin>' -H 'Access-Control-Request-Method: PATCH' -H 'Access-Control-Request-Headers: content-type,authorization'`

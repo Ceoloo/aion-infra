@@ -4,12 +4,12 @@
 # Use this snippet only when the host Traefik is configured with a file provider
 # and does not watch Docker.
 #
-# Replace runtime.aionsystems.ai / certResolver / entryPoints to match the host.
+# Replace runtime.example.com / certResolver / entryPoints to match the host.
 
 http:
   routers:
     aion-runtime:
-      rule: Host(`runtime.aionsystems.ai`)
+      rule: Host(`runtime.example.com`)
       entryPoints:
         - websecure
       service: aion-runtime

@@ -151,7 +151,8 @@ separate issue — flag for the next slice).
 - **Reverse proxy:** host Traefik (not a container-network peer — runs with
   `network_mode: host`), Let's Encrypt HTTP-01 via `admin@srv1655818.hstgr.cloud`,
   routes `runtime.srv1655818.hstgr.cloud` → `aion-runtime:8080`.
-  `runtime.aionsystems.ai` DNS not yet cut over (per existing runbook notes).
+  *(Update 2026-09-25: the planned cut-over to a second hostname is void — AION owns no domain; production
+  stays on the Hostinger hostname. See `recovery-kit.md` "Runtime hostname change".)*
 - **Scheduled jobs:** root crontab has 2 lines — these belong to a
   **separate, older system** (`/root/aion-company-os/aion-scheduler.sh
   tick` every 5 min; `/root/AION/scripts/run-revenue-projector.sh` every

@@ -11,14 +11,14 @@ reviewers. **Do not AI-auto-deploy production.**
 
 ```bash
 # From aion-infra checkout (or any host with curl):
-URL=https://runtime.aionsystems.ai \
+URL=https://runtime.srv1655818.hstgr.cloud \
   CHECK_SERVICES=1 \
   CORS_ORIGIN=https://aion-operator-console.vercel.app \
   scripts/verify-p0-runtime-readiness.sh
 
 # Optional Copilot + host env presence (values never printed):
-URL=https://runtime.aionsystems.ai \
-  COPILOT_URL=https://copilot.aionsystems.ai \
+URL=https://runtime.srv1655818.hstgr.cloud \
+  COPILOT_URL=https://copilot.runtime.srv1655818.hstgr.cloud \
   ENV_FILE=/opt/aion/.env \
   STRICT_ENV=1 \
   scripts/verify-p0-runtime-readiness.sh
@@ -119,8 +119,8 @@ docker compose --profile revenue-copilot up -d
 ```
 
 Copilot must point `AION_RUNTIME_URL` at the durable Runtime FQDN used for
-`/v1/commands`. Prefer the stable hostname (`runtime.aionsystems.ai`) once DNS
-resolves; until then the live Hostinger FQDN is acceptable.
+`/v1/commands` — in production `https://runtime.srv1655818.hstgr.cloud` (the free Hostinger hostname,
+kept by owner decision 2026-09-25; see "Runtime hostname change" in `recovery-kit.md`).
 
 ## Operator checklist (no deploy)
 
