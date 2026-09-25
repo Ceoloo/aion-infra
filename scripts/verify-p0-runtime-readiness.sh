@@ -7,7 +7,7 @@
 # Does NOT deploy, migrate, restart containers, or mutate infrastructure.
 #
 # Required:
-#   URL                  Runtime base URL (e.g. https://runtime.aionsystems.ai)
+#   URL                  Runtime base URL (production: https://runtime.srv1655818.hstgr.cloud)
 #
 # Optional:
 #   TOKEN                Bearer token for authenticated probes (GCP identity token)

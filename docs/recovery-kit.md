@@ -88,7 +88,7 @@ Procedure (new Supabase project, or the `supabase/postgres` image):
 ## Runtime hostname change (every full-host recovery)
 Production runs on the free Hostinger name `runtime.srv1655818.hstgr.cloud` (copilot: `copilot.runtime.srv1655818.hstgr.cloud`),
 which belongs to that server. A recovered server has a different name, so a recovery **always** changes the runtime URL.
-Decision 2026-09-25: accept this ($0) rather than buy a domain; AION does not own `aionsystems.ai`. Update, in order:
+Decision 2026-09-25: accept this ($0) rather than buy a domain (AION owns no domain today). Update, in order:
 1. `/opt/aion/.env`: `AION_DOMAIN`, `COPILOT_DOMAIN`, `AION_RUNTIME_URL` (copilot → runtime) → the new server's names;
    `AION_CORS_ORIGINS` stays (it is the Console's origin, not the runtime's).
 2. `/opt/aion/.env.monitor`: `HEALTH_URL`.

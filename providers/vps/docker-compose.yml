@@ -114,7 +114,7 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-3.5-sonnet}
       # Durable Runtime — required for production /api → /v1/commands path.
-      # Prefer live Hostinger FQDN until runtime.aionsystems.ai DNS resolves.
+      # Production: the Hostinger FQDN (AION owns no domain; see docs/recovery-kit.md "Runtime hostname change").
       AION_RUNTIME_URL: ${AION_RUNTIME_URL:-https://runtime.srv1655818.hstgr.cloud}
       # Bearer must match a token in Runtime AION_GATEWAY_API_KEYS (service principal).
       AION_RUNTIME_API_KEY: ${AION_RUNTIME_API_KEY:-}
