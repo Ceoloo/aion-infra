@@ -5,6 +5,19 @@ backups, AION can be restored to an operational state without relying on the ori
 Only when this drill passes is AION stamped **RECOVERABLE — VERIFIED**: recovery of the state (already proven weekly,
 see `recovery-kit.md`) *and* of the system that runs it.
 
+## Decisions (owner, 2026-09-25)
+- **Provider:** Hostinger, same as production (monthly billing; cancel within the 30-day refund window after the drill).
+  Choose Ubuntu 24.04 **plain OS** (not a one-click app template) so the server is genuinely blank, x86_64, KVM 2 or larger.
+- **Hostname:** `runtime.<drill-ip>.sslip.io` (no DNS change). The server's own `srvNNNN.hstgr.cloud` is not used.
+- **When:** the next session the owner starts with the drill server ready.
+
+## Owner prep checklist (before the session)
+1. Hostinger: new VPS, Ubuntu 24.04 plain, root SSH enabled; note its IP.
+2. Backblaze: new application key, **read-only**, bucket `aion-prod-backups-ceoloo` only; keep keyID + key in the password manager.
+3. GitHub: fine-grained or classic token with `read:packages` only (GHCR pull), short expiry.
+4. Password manager open: GPG key file entry + passphrase entry.
+5. Vercel access to the operator-console project (for the preview deployment).
+
 ## Ground rules
 1. **Nothing comes from the production VPS.** Allowed sources: GitHub (repos, GHCR images), B2 (backups), the owner's
    recovery kit (password manager: GPG key + passphrase; Backblaze, GitHub, provider logins). No `scp` from
