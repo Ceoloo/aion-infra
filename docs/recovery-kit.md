@@ -85,6 +85,20 @@ Procedure (new Supabase project, or the `supabase/postgres` image):
    (and any other Vault secret) and point cron job URLs at the new project before re-enabling jobs one by one.
 6. Redeploy the 31 edge functions and set their secrets (project secret key "default", LEEP/Slack/ingest keys).
 
+## Runtime hostname change (every full-host recovery)
+Production runs on the free Hostinger name `runtime.srv1655818.hstgr.cloud` (copilot: `copilot.runtime.srv1655818.hstgr.cloud`),
+which belongs to that server. A recovered server has a different name, so a recovery **always** changes the runtime URL.
+Decision 2026-09-25: accept this ($0) rather than buy a domain; AION does not own `aionsystems.ai`. Update, in order:
+1. `/opt/aion/.env`: `AION_DOMAIN`, `COPILOT_DOMAIN`, `AION_RUNTIME_URL` (copilot → runtime) → the new server's names;
+   `AION_CORS_ORIGINS` stays (it is the Console's origin, not the runtime's).
+2. `/opt/aion/.env.monitor`: `HEALTH_URL`.
+3. `/docker/traefik/.env`: `ACME_EMAIL` (today `admin@srv1655818.hstgr.cloud`, which probably receives no mail — use a real address).
+4. `deploy.sh` / compose up → Traefik issues certificates for the new names.
+5. Vercel project `aion-operator-console`: env `RUNTIME_URL` (server-side BFF proxy target) → new URL; redeploy production.
+6. `aion-runtime` `scripts/lib/production-ids.json` → add the new host to `runtimeHosts`, so the proof guard keeps
+   refusing to run proofs against production.
+7. The config backup runs automatically on the `.env` change (on-change policy); confirm a new `config-aion/<stamp>/`.
+
 ## Clean-host restoration sequence
 Steps marked ✅ were rehearsed; ⬜ are documented but **untested**.
 0. **Recovery kit in hand** (below). Without the private key nothing else works.
@@ -98,7 +112,7 @@ Steps marked ✅ were rehearsed; ⬜ are documented but **untested**.
 6. Compare `db-fingerprint.sh` and grants to expectations; confirm both roles log in. ✅
 7. `deploy.sh` with the digest-pinned image: migrate (a no-op on a restored DB) → roll → readiness → smoke. ⬜ (needs GHCR
    auth and the image on the new host)
-8. Traefik (compose restored from the archive), DNS for the runtime hostname, ACME re-issue. ⬜
+8. Traefik (compose restored from the archive); **runtime hostname change** (section above); ACME issue. ⬜
 9. Re-enable timers (monitor, backups) and confirm an alert reaches ntfy. ⬜
 10. If the old host may have been compromised: rotate every secret in `.env` (see `exposure-review-2026-09-20.md`). ⬜
 

@@ -42,8 +42,7 @@ see `recovery-kit.md`) *and* of the system that runs it.
 ## Infrastructure
 - **Server:** x86_64 Ubuntu 24.04, 2 vCPU / 4 GB+ (prod is x86_64). Hourly-billed provider (Hetzner CX22, DigitalOcean,
   Vultr) keeps it to roughly one hour of cost. Hostinger bills monthly (refundable within 30 days).
-- **Hostname:** `runtime.<drill-ip>.sslip.io` needs no DNS change and gets a real TLS certificate. Alternative that also
-  exercises Cloudflare DNS: `dr-drill.aionsystems.ai` (an A record the owner adds, deleted afterwards).
+- **Hostname:** `runtime.<drill-ip>.sslip.io` needs no DNS change and gets a real TLS certificate.
 - **Console:** a Vercel **preview** deployment of the operator console with `AION_RUNTIME_URL` pointing at the drill
   runtime, and the drill runtime's `AION_CORS_ORIGINS` set to that preview origin. Production Console untouched.
 
@@ -95,9 +94,9 @@ preview and any drill DNS record. Production untouched: confirm prod readiness a
 | **Undocumented dependencies** | anything needed that `recovery-kit.md` / this doc did not list | 0 after fixes; each one found is added to the recovery kit |
 
 Known before the drill (counted as found by planning, not by the drill): production's hostname
-`runtime.srv1655818.hstgr.cloud` is tied to the Hostinger server ID and cannot move to a new server, so a real recovery
-changes the runtime URL and the Console's `AION_RUNTIME_URL`/CORS must follow. Moving production to a hostname AION
-controls (e.g. `runtime.aionsystems.ai` on Cloudflare) removes this.
+`runtime.srv1655818.hstgr.cloud` is a free, Hostinger-provided name bound to that server and cannot move. Owner decision
+(2026-09-25): keep it ($0) and treat the URL change as a documented recovery step — see "Runtime hostname change" in
+`recovery-kit.md`. The drill executes that step and records its duration. Revisit if AION buys a domain.
 
 ## Pass criteria → stamp
 All 13 steps pass with production untouched and no material taken from the original VPS. Record the four numbers,
