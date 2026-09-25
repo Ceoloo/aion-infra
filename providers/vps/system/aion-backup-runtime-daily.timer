@@ -1,0 +1,10 @@
+[Unit]
+Description=Run AION runtime (aion_data) daily backup
+
+[Timer]
+OnCalendar=*-*-* 02:35:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,24 @@
+[Unit]
+Description=Policy: any production .env/secret/config change triggers a fresh encrypted config backup (not the daily schedule)
+
+[Path]
+# Same allow-list as backup-aion-config.sh ITEMS. Directory entries fire when a file inside is written/created/removed.
+PathChanged=/opt/aion/.env
+PathChanged=/opt/aion/.env.monitor
+PathChanged=/opt/aion/docker-compose.yml
+PathChanged=/opt/aion/system
+PathChanged=/opt/aion/traefik
+PathChanged=/opt/aion/scripts
+PathChanged=/opt/aion/bin
+PathChanged=/opt/aion/ol-metrics.schema.sql
+PathChanged=/etc/sudoers.d/aion-deploy
+PathChanged=/docker/traefik/docker-compose.yml
+PathChanged=/opt/aion-backup/bin
+PathChanged=/opt/aion-backup/DISASTER_RECOVERY.md
+PathChanged=/etc/systemd/system
+Unit=aion-backup-config.service
+TriggerLimitIntervalSec=10min
+TriggerLimitBurst=6
+
+[Install]
+WantedBy=paths.target

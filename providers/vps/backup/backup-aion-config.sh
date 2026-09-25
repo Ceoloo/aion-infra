@@ -29,7 +29,7 @@ FPR="$(cat "$GPG_RECIPIENT_FILE")"
 ITEMS=(/opt/aion/.env /opt/aion/.env.monitor /opt/aion/docker-compose.yml /opt/aion/system /opt/aion/traefik
        /opt/aion/scripts /opt/aion/bin /opt/aion/ol-metrics.schema.sql /opt/aion/PROVENANCE
        /etc/sudoers.d/aion-deploy /docker/traefik/docker-compose.yml /opt/aion-backup/bin /opt/aion-backup/DISASTER_RECOVERY.md)
-for f in /etc/systemd/system/aion-*.service /etc/systemd/system/aion-*.timer; do [ -e "$f" ] && ITEMS+=("$f"); done
+for f in /etc/systemd/system/aion-*.service /etc/systemd/system/aion-*.timer /etc/systemd/system/aion-*.path; do [ -e "$f" ] && ITEMS+=("$f"); done
 EXIST=(); REL=()
 for p in "${ITEMS[@]}"; do if [ -e "$p" ]; then EXIST+=("$p"); REL+=("${p#/}"); else log_warn "absent, skipping: $p"; fi; done
 
