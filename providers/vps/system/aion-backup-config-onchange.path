@@ -13,6 +13,7 @@ PathChanged=/opt/aion/bin
 PathChanged=/opt/aion/ol-metrics.schema.sql
 PathChanged=/etc/sudoers.d/aion-deploy
 PathChanged=/docker/traefik/docker-compose.yml
+PathChanged=/docker/traefik/.env
 PathChanged=/opt/aion-backup/bin
 PathChanged=/opt/aion-backup/DISASTER_RECOVERY.md
 PathChanged=/etc/systemd/system

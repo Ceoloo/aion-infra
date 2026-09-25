@@ -92,7 +92,7 @@ Decision 2026-09-25: accept this ($0) rather than buy a domain; AION does not ow
 1. `/opt/aion/.env`: `AION_DOMAIN`, `COPILOT_DOMAIN`, `AION_RUNTIME_URL` (copilot → runtime) → the new server's names;
    `AION_CORS_ORIGINS` stays (it is the Console's origin, not the runtime's).
 2. `/opt/aion/.env.monitor`: `HEALTH_URL`.
-3. `/docker/traefik/.env`: `ACME_EMAIL` (today `admin@srv1655818.hstgr.cloud`, which probably receives no mail — use a real address).
+3. `/docker/traefik/.env`: `ACME_EMAIL` is `aion.systems.empire@gmail.com` since 2026-09-25 (was the undeliverable `admin@srv1655818.hstgr.cloud`); keep it. The file is in the config backup since 2026-09-25 (Traefik will not start without it).
 4. `deploy.sh` / compose up → Traefik issues certificates for the new names.
 5. Vercel project `aion-operator-console`: env `RUNTIME_URL` (server-side BFF proxy target) → new URL; redeploy production.
 6. `aion-runtime` `scripts/lib/production-ids.json` → add the new host to `runtimeHosts`, so the proof guard keeps
