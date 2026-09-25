@@ -27,6 +27,7 @@ dec() { echo "$OFFPW" | GNUPGHOME="$OFFT" gpg --batch --yes --pinentry-mode loop
 log_info "=== rehearsal: config-aion/$CS + db/$DS -> clean isolated Postgres ==="
 for o in "config-aion/$CS/roles-globals.sql.gpg:$D/roles.gpg" "config-aion/$CS/aion-config.tar.gpg:$D/cfg.gpg" "db/$DS/postgres-aion-runtime.dump.gpg:$D/db.gpg"; do
   rclone_retry copyto "b2:${B2_BUCKET}/${o%%:*}" "${o#*:}" 2>>"$LOG_FILE" || { no "download failed: ${o%%:*}"; exit 1; }
+  [ -s "${o#*:}" ] || { no "backup object missing or empty in B2: ${o%%:*} (wrong stamp?)"; exit 1; }  # rclone exits 0 on a missing source
 done; ok "downloaded roles, config and database objects from B2 (ciphertext)"
 
 docker rm -f "$C" >/dev/null 2>&1
@@ -85,6 +86,7 @@ while IFS= read -r f; do [ -f "/$f" ] || { DIFF=$((DIFF+1)); log_warn "archived 
   a="$(dec "$D/cfg.gpg" | tar -xOf - "$f" 2>/dev/null | sha256sum | cut -d' ' -f1)"; l="$(sha256sum "/$f" | cut -d' ' -f1)"
   [ "$a" = "$l" ] && SAME=$((SAME+1)) || { DIFF=$((DIFF+1)); log_warn "archived != live: $f"; }
 done < <(dec "$D/cfg.gpg" | tar -t | grep -v '/$')
+[ "$SAME" = 0 ] && { no "config archive listed 0 files — vacuous check"; DIFF=1; }
 [ "$DIFF" = 0 ] && ok "all $SAME archived files are identical (by hash) to the live files" || no "$DIFF archived file(s) differ from live"
 log_info "=== rehearsal result: $PASS passed, $FAIL failed ==="
 [ "$FAIL" = 0 ]

@@ -1,18 +1,21 @@
-# Recovery — what is covered, what was proven, what is not (2026-09-20)
+# Recovery — what is covered, what was proven, what is not (updated 2026-09-25)
 
-**Full-host recovery is NOT declared covered.** The database tier and the deployment-config tier are now backed up,
-encrypted, off-host, and rehearsed. Two things stop the declaration: the off-host custody of the decryption key
-(only you can confirm) and the untested clean-host steps listed below.
+**Full-host recovery is NOT declared covered yet.** Every data tier (runtime DB hourly + daily, deployment config,
+Supabase) is backed up, encrypted, off-host, restore-tested, and re-tested automatically every week. Key custody off
+this host was proven on 2026-09-25. What still stops the declaration is the clean-VPS rebuild drill
+(`docs/dr-drill-v1.md`): until a blank server has been turned into a working AION from the recovery kit and B2 alone,
+the state is proven recoverable but the system that runs it is not.
 
 ## Coverage matrix
 | Needed to recover | State | Evidence / gap |
 |---|---|---|
-| `aion_data` (data, ownership, ACLs) | **Backed up hourly**, GPG-encrypted, B2, 48 h window | rehearsed (below). No long-term daily/weekly tier |
+| `aion_data` (data, ownership, ACLs) | **Backed up hourly** (48 h window) **+ daily 02:35 UTC** (`daily/`, 30 days); GPG, B2 | rehearsed (below); both tiers restore-tested weekly |
+| Supabase "AION EMPIRE SYSTEM" (`qbahthzqvxytfgobgtxa`; free plan = no platform backups) | **Backed up nightly 02:50 UTC** (`supabase/`, 30 days); `pg_dump` 17 → GPG → B2 | restore-tested 2026-09-25 and weekly (see "Supabase recovery") |
 | Postgres roles + password hashes, memberships | **Backed up daily** (`roles-globals.sql.gpg`) | rehearsed: hashes identical; both roles log in with the archived `.env` passwords |
 | Grants / default privileges / schema ACLs | **Inside the `aion_data` dump** (custom format keeps ACLs); restored after roles | 198 table grants, 2,253 column grants, 3 default-ACL rows, schema/db ACLs, 20 ownership rows identical to production |
-| `/opt/aion/.env`, `.env.monitor`, compose, `system/ traefik/ scripts/ bin/`, `/opt/aion-backup/bin`, systemd units, sudoers, `/docker/traefik/docker-compose.yml` | **Backed up daily** (`aion-config.tar.gpg`, 49 allow-listed entries) | scope-checked; all 39 regular files hash-identical to live |
+| `/opt/aion/.env`, `.env.monitor`, compose, `system/ traefik/ scripts/ bin/`, `/opt/aion-backup/bin`, systemd units (`aion-*.service/.timer/.path`), sudoers, `/docker/traefik/docker-compose.yml` | **Backed up daily and on every change** (policy below) | 2026-09-25: all 53 regular files hash-identical to live |
 | Let's Encrypt cert volume | Legacy `full/` tier only, **disabled since 2026-09-02** | re-issuable via ACME; not backed up |
-| Backup **decryption key + passphrase** | on this host only | **off-host copy unverified — needs your confirmation** |
+| Backup **decryption key + passphrase** | on this host **and** off-host, key and passphrase in separate password-manager entries | **custody proven 2026-09-25** (owner decrypted `custody-check.gpg` off-host; full sha256 matched). Owner chose to keep the host copy too, so drills stay automatic |
 | B2 application key, rclone config, ntfy topic | this host only | B2 key re-mintable via Backblaze login; ntfy topic replaceable |
 | GitHub Actions secrets, DNS, Hostinger account/snapshots | outside this host | not inspectable |
 
@@ -45,6 +48,43 @@ encrypted, off-host, and rehearsed. Two things stop the declaration: the off-hos
    fails on any SQL error or empty result, and the DDL probe records what actually happened; the FAIL did not reproduce in
    three later runs with two probe forms, and its cause was not determined.
 
+## Policy: every production config change triggers a fresh encrypted config backup
+Any change to production `.env`, secrets, compose, Traefik, DR scripts or `aion-*` systemd units must be followed by a
+config backup, not left for the daily 03:40 run. Why: on 2026-09-25 the newest config backup predated the GHL PIT rotation
+by 18 h, so a restore at that moment would have brought back a **revoked** token.
+**Enforced, not remembered:** `aion-backup-config-onchange.path` watches the same allow-list as `backup-aion-config.sh`
+and starts `aion-backup-config.service` on any change (limit 6 runs / 10 min). Tested: a change produced an encrypted,
+checksum-verified `config-aion/<stamp>/` within seconds. Manual equivalent: `systemctl start aion-backup-config.service`.
+Retention is the newest 30 config backups by count, so a burst of edits shortens the history window.
+
+## Weekly restore validation (permanent)
+`aion-restore-drill.timer` (Sun 04:30 UTC) → `run-restore-drills.sh`, against the newest objects in B2:
+1. runtime hourly + config — `restore-rehearsal-aion.sh <config> <db>` (clean-host rebuild, compared with production, 18 checks)
+2. runtime daily — `restore-test-aion-runtime.sh <daily> daily`
+3. Supabase — `restore-test-supabase.sh <stamp>` (isolated, no network, compared with live, 9 checks)
+
+Success is recorded silently in `/var/lib/aion-backup/restore-drills.json` (last 52 runs, `last_success`). Any failure →
+`alert_failure` (ntfy, high) **and** a non-zero exit, so `OnFailure=aion-backup-alert@` fires as the independent path.
+All three are read-only against production and shred their plaintext. Runtime ~75 s. The config comparison is strict:
+a file changed since the newest config backup FAILS the drill; the policy above keeps that from happening silently.
+Wrong or missing stamps fail (rclone exits 0 on a missing source; the scripts check for an empty download).
+
+## Supabase recovery
+Restore target must match the live Postgres version (17.6 on 2026-09-25; the drill fails on a mismatch). Drill evidence
+2026-09-25: 234/234 tables, 230 row-count-identical, 4 continuously-written log tables only grew since the dump; functions
+109, RLS policies 113, RLS-enabled tables 192, triggers 64, views 48, cron jobs 11 identical; md5 of `auth.users` (incl.
+password hashes), migration history and cron definitions identical.
+Procedure (new Supabase project, or the `supabase/postgres` image):
+1. **Before the target has any network access / before the project can make outbound calls**, be ready to pause cron:
+   the dump carries **11 pg_cron jobs** that call the edge functions of the **old** project URL via `pg_net`, and they
+   start firing the moment `cron.job` is restored (observed in the drill: 2 jobs fired within minutes).
+2. Create roles missing on a fresh target: `supabase_realtime_admin`, `supabase_functions_admin` (NOLOGIN).
+3. `pg_restore --clean --if-exists` as the admin role, then immediately `UPDATE cron.job SET active = false;`.
+4. Recreate the event trigger `ensure_rls` (needs superuser; it fails to restore otherwise).
+5. **Vault secrets do not survive**: they are encrypted with a per-project pgsodium key. Recreate `edge_internal_token`
+   (and any other Vault secret) and point cron job URLs at the new project before re-enabling jobs one by one.
+6. Redeploy the 31 edge functions and set their secrets (project secret key "default", LEEP/Slack/ingest keys).
+
 ## Clean-host restoration sequence
 Steps marked ✅ were rehearsed; ⬜ are documented but **untested**.
 0. **Recovery kit in hand** (below). Without the private key nothing else works.
@@ -62,14 +102,14 @@ Steps marked ✅ were rehearsed; ⬜ are documented but **untested**.
 9. Re-enable timers (monitor, backups) and confirm an alert reaches ntfy. ⬜
 10. If the old host may have been compromised: rotate every secret in `.env` (see `exposure-review-2026-09-20.md`). ⬜
 
-**Objectives (not yet measured end to end):** RPO ≤ 1 h data, ≤ 24 h config. RTO for a full host is unknown.
+**Objectives:** RPO by cadence: runtime DB ≤ 1 h, Supabase ≤ 24 h, config = last change (on-change policy). RTO for a
+full host is unknown until `docs/dr-drill-v1.md` is run.
 
 ## Recovery kit — what only you can hold (please confirm each)
-1. **GPG private key + passphrase, stored separately from each other and off this host.** Today the key
-   (`PRIVATE_KEY_SAVE_OFFSITE_THEN_DELETE.asc`) and its passphrase memo sit in one directory on one disk, so the passphrase
-   adds no protection here and losing the host loses every backup. *Unverified.* Note the tension: the August DR doc says
-   to delete the key from the VPS after copying it out, but `verify`, the drills and the rehearsal read it from the VPS.
-   If you remove it, they need the key supplied at run time — decide which you want.
+1. **GPG private key + passphrase, stored separately from each other and off this host.** ✅ Confirmed 2026-09-25
+   (custody check matched; key file and passphrase in separate password-manager entries). Decision: the host copy is
+   kept as well so the weekly drills run unattended; trade-off accepted by the owner (root on this host could decrypt
+   every backup).
 2. Backblaze login (to mint a new key for the backup bucket).
 3. GitHub access to the org's repos and **GHCR** pull access (image digests are pinned in `.env`).
 4. Hostinger login (VPS, snapshots) and the DNS provider for the runtime hostname.
@@ -77,4 +117,4 @@ Steps marked ✅ were rehearsed; ⬜ are documented but **untested**.
 
 Step-by-step, with a public-value proof you can run yourself: `docs/offhost-key-custody.md`.
 
-**I will not mark full-host recovery covered until you confirm item 1.**
+**Full-host recovery is declared covered only after `docs/dr-drill-v1.md` passes.**

@@ -14,7 +14,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-MODE="${1:-db}"          # db | full — only affects the B2 destination prefix
+MODE="${1:-db}"          # db | daily | full — only affects the B2 destination prefix
 STAMP="${2:-$RUN_STAMP}"
 PREFIX="${MODE}/${STAMP}"
 
@@ -55,10 +55,10 @@ fi
 # long-term retention claim by design (full/ dumps cover long-term
 # history), and this only touches directories THIS script creates plus any
 # equally-stale db/ entries already past their intended 48h lifetime).
-prune_db_window() {
-    local max_age_hours=48
+prune_window() {   # prune_window <prefix> <max-age-hours>
+    local prefix="$1" max_age_hours="$2"
     local stamps now_epoch
-    stamps=$(rclone lsf "b2:${B2_BUCKET}/db/" --dirs-only 2>>"$LOG_FILE") || return 0
+    stamps=$(rclone lsf "b2:${B2_BUCKET}/${prefix}/" --dirs-only 2>>"$LOG_FILE") || return 0
     [ -z "$stamps" ] && return 0
     now_epoch=$(date -u +%s)
     while IFS= read -r stamp; do
@@ -68,12 +68,19 @@ prune_db_window() {
         stamp_epoch=$(date -u -d "${stamp:0:8} ${stamp:9:2}:${stamp:11:2}:${stamp:13:2}" +%s 2>/dev/null) || continue
         age_hours=$(( (now_epoch - stamp_epoch) / 3600 ))
         if [ "$age_hours" -gt "$max_age_hours" ]; then
-            log_info "Pruning expired db/${stamp} (age ${age_hours}h)"
-            rclone purge "b2:${B2_BUCKET}/db/${stamp}" 2>>"$LOG_FILE" \
-                || log_warn "failed to prune db/${stamp}"
+            log_info "Pruning expired ${prefix}/${stamp} (age ${age_hours}h)"
+            rclone purge "b2:${B2_BUCKET}/${prefix}/${stamp}" 2>>"$LOG_FILE" \
+                || log_warn "failed to prune ${prefix}/${stamp}"
         fi
     done <<< "$stamps"
 }
-prune_db_window
+
+# db/ keeps 48h of hourly dumps; daily/ (MODE=daily, aion-backup-runtime-daily.timer)
+# keeps 30 days so a problem noticed late still has a clean copy to restore.
+if [ "$MODE" = "daily" ]; then
+    prune_window daily 720
+else
+    prune_window db 48
+fi
 
 exit 0
