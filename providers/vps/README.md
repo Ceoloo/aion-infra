@@ -201,9 +201,15 @@ Wire the Runtime to it via `AION_TRAEFIK_NETWORK` / `AION_TRAEFIK_NETWORK_EXTERN
   input. It never deploys a mutable tag, `:latest`, or `aion-runtime`'s `main`.
 - **Fail-closed migrations:** a failed migration aborts before the runtime is
   rolled; the previous container keeps serving.
-- **Automatic rollback:** if the new container fails readiness or the smoke
-  test, `deploy.sh` restores the previously-serving image (and rewrites
-  `.env`), then exits non-zero.
+- **Compatibility-gated rollback:** migrations are forward-only. If the new
+  container fails readiness or smoke, `deploy.sh` restores the previous image
+  only when both `AION_ROLLBACK_COMPATIBLE_IMAGE` and
+  `AION_ROLLBACK_COMPATIBLE_GIT_SHA` exactly match the captured serving image
+  and commit. Leave both unset until that image has been reviewed against the
+  post-migration schema, ideally by running it against an isolated database
+  copy. If they do not match, the script leaves the candidate state in place,
+  exits non-zero, and requires manual intervention; it does not claim that
+  restoring an old container reverses schema changes.
 - **Keep the previous image:** any `docker image prune -a` / `--filter until=…`
   job on the host must exclude `ghcr.io/ceoloo/aion-runtime`, or a rollback has
   nothing to roll back to.
