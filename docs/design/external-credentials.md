@@ -1,11 +1,14 @@
-# Design Spec — External Credentials (OpenRouter, GoHighLevel)
+# Design Spec — External Credentials (OpenRouter, GoHighLevel, Twenty)
 
-- **Drives:** integrating an external model router (OpenRouter) and an external
-  CRM (GoHighLevel) as governed AION execution environments
+- **Drives:** integrating an external model router (OpenRouter) and CRM
+  systems-of-engagement (GoHighLevel migration adapter; Twenty primary SoE per
+  ADR-019 / CRM-001) as governed AION execution environments
 - **Priority:** per-mission (wire when a mission needs the model router or CRM)
 - **Status:** Credential slots + Revenue Copilot HTTP consumer profile landed.
-  Rotate keys into `/opt/aion/.env`; enable compose profile `revenue-copilot`
-  when `COPILOT_IMAGE` is set. GHL writes still wait on Execution Gateway.
+  Twenty overlay is profile-gated (`providers/vps/twenty/`) — off by default.
+  Production remains on GHL until CRM-001 proofs pass. Rotate keys into
+  `/opt/aion/.env`; enable compose profile `revenue-copilot` when
+  `COPILOT_IMAGE` is set.
 
 `aion-infra` owns **where secrets live and how they reach the workload**. This
 spec defines the credential contract for two external services. It contains **no
@@ -31,12 +34,18 @@ Following the [security model](https://github.com/Ceoloo/aion-docs/blob/main/arc
 |---|---|---|---|
 | `OPENROUTER_API_KEY` | OpenRouter | auth for the model-router provider | Bearer token (`sk-or-...`). Meters real credits — scope/limit it. |
 | `OPENROUTER_MODEL` | OpenRouter | default model id (e.g. `anthropic/claude-3.5-sonnet`) | not a secret; config, may live in non-secret env. |
-| `GHL_API_KEY` | GoHighLevel | auth for the CRM tool | Private Integration Token (`pit-...`). Bearer. |
+| `GHL_API_KEY` | GoHighLevel | auth for the CRM tool (migration SoE) | Private Integration Token (`pit-...`). Bearer. |
 | `GHL_LOCATION_ID` | GoHighLevel | which sub-account the tool acts on | not a secret; config. |
 | `GHL_API_VERSION` | GoHighLevel | API version header (e.g. `2021-07-28`) | not a secret; config. |
+| `CRM_PROVIDER` | Runtime | `ghl` (default) \| `twenty` | unset = ghl; do not set `twenty` in production until CRM-001 gate |
+| `TWENTY_API_KEY` | Twenty (self-hosted) | Runtime → Twenty API | secret; inject only into `aion-runtime` |
+| `TWENTY_API_BASE_URL` | Twenty | e.g. `http://twenty-server:3000` | config; prefer `aion_internal` DNS |
+| `TWENTY_BACKEND` | Runtime | `fake` \| `live` when `CRM_PROVIDER=twenty` | parallel to `GHL_BACKEND` |
+| `TWENTY_APP_SECRET` / `TWENTY_PG_PASSWORD` | Twenty overlay | Twenty app + its Postgres | secrets; overlay profile only — never `aion_data` |
 
-Only `OPENROUTER_API_KEY` and `GHL_API_KEY` are **secrets** (secret store). The
-rest are ordinary configuration and may be plain env in the profile.
+Only `OPENROUTER_API_KEY`, `GHL_API_KEY`, `TWENTY_API_KEY`, `TWENTY_APP_SECRET`,
+and `TWENTY_PG_PASSWORD` are **secrets** (secret store). The rest are ordinary
+configuration and may be plain env in the profile.
 
 ## Injection per provider profile
 
@@ -61,7 +70,9 @@ Compose uses **per-service allowlists** (least privilege; Runtime still withhold
 
 | Credential | Injected into | Not injected into |
 |---|---|---|
-| `GHL_*` | `aion-runtime` (Phase A/B CRM via adapter + Execution Gateway) | Revenue Copilot (GHL writes blocked until gateway; keys stay off Copilot) |
+| `GHL_*` | `aion-runtime` (CRM via adapter + Execution Gateway; migration SoE) | Revenue Copilot (keys stay off Copilot) |
+| `CRM_PROVIDER` / `TWENTY_BACKEND` / `TWENTY_API_*` | `aion-runtime` only | Copilot / browser / `VITE_*` |
+| `TWENTY_APP_SECRET` / `TWENTY_PG_*` | Twenty compose overlay (`--profile twenty`) | `aion-runtime` (uses API URL+key, not Twenty DB password) |
 | `OPENROUTER_*` | `revenue-copilot` profile only | `aion-runtime` |
 | `DATABASE_URL` | `aion-runtime` | Copilot / browser |
 | `MIGRATION_DATABASE_URL` | migrate one-shot only | long-running Runtime |
