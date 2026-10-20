@@ -48,6 +48,12 @@ services:
       GHL_API_VERSION: ${GHL_API_VERSION:-2021-07-28}
       # Explicit CRM backend (live|fake). Production must set live; unset falls back to inferred-live with a warning (see aion-runtime backend-policy).
       GHL_BACKEND: ${GHL_BACKEND:-}
+      # CRM-001 / ADR-019 — provider selector. Default unset = ghl (production GHL unchanged).
+      # Do NOT set CRM_PROVIDER=twenty in production until Twenty workflow/isolation/rollback proofs pass.
+      CRM_PROVIDER: ${CRM_PROVIDER:-}
+      TWENTY_BACKEND: ${TWENTY_BACKEND:-}
+      TWENTY_API_BASE_URL: ${TWENTY_API_BASE_URL:-}
+      TWENTY_API_KEY: ${TWENTY_API_KEY:-}
     # Internal only — never publish 8080 on the host. Traefik reaches us via
     # the external edge network + Docker labels.
     expose:

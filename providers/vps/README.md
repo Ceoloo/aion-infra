@@ -59,6 +59,9 @@ providers/vps/
 ├── .env.example           secrets contract (copy to root-owned 0600 /opt/aion/.env)
 ├── .env.monitor.example   aion-monitor config (thresholds + alert webhook)
 ├── .env.backup.example    aion-backup config (S3-compatible creds)
+├── twenty/                CRM-001 Twenty SoE overlay (profile twenty — OFF by default)
+│   ├── README.md
+│   └── docker-compose.twenty.yml
 ├── traefik/
 │   └── aion-runtime.yml.example   optional file-provider snippet
 ├── legacy/
@@ -77,6 +80,13 @@ providers/vps/
     ├── backup.sh
     └── restore.sh
 ```
+
+### Twenty CRM overlay (CRM-001)
+
+Optional self-hosted Twenty on `aion_internal` (separate Postgres volume). See
+[`twenty/README.md`](twenty/README.md). **Do not enable in production or set
+`CRM_PROVIDER=twenty` on Runtime until workflow / isolation / governance /
+rollback proofs pass.** Default deploy path remains GHL-only.
 
 ## Database modes (same application, config-only difference)
 

@@ -1,0 +1,160 @@
+# ============================================================================
+# AION — Twenty CRM SoE overlay (CRM-001 / ADR-019)
+# ============================================================================
+# Profile-gated. Does NOT start with the default VPS stack. Production GHL on
+# aion-runtime is unchanged until CRM_PROVIDER=twenty is explicitly enabled
+# after workflow / isolation / governance / rollback proofs pass.
+#
+# Enable (dev / staging only until certified):
+#   docker compose -f docker-compose.yml -f twenty/docker-compose.twenty.yml \
+#     --profile twenty up -d
+#
+# Topology:
+#   aion-runtime  ──(aion_internal)──▶  twenty-server:3000
+#   twenty-db / twenty-redis          on aion_internal only (never public)
+#   twenty-server UI (optional Traefik) — prefer VPN / IP allowlist; not required
+#                                         for Runtime→CRM API traffic
+#
+# Database: SEPARATE from aion_data (pgdata). Never share Runtime Postgres.
+# ============================================================================
+
+services:
+  twenty-db:
+    profiles: ["twenty"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${TWENTY_PG_USER:-twenty}
+      POSTGRES_PASSWORD: ${TWENTY_PG_PASSWORD:?set TWENTY_PG_PASSWORD in .env for twenty profile}
+      POSTGRES_DB: ${TWENTY_PG_DATABASE:-twenty}
+    volumes:
+      - twenty_pgdata:/var/lib/postgresql/data
+    # Bind localhost only — ops / backup; Runtime uses Docker DNS on internal.
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TWENTY_PG_USER:-twenty} -d ${TWENTY_PG_DATABASE:-twenty}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    stop_grace_period: 60s
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  twenty-redis:
+    profiles: ["twenty"]
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  twenty-server:
+    profiles: ["twenty"]
+    image: twentycrm/twenty:${TWENTY_TAG:-v0.40.0}
+    restart: unless-stopped
+    depends_on:
+      twenty-db:
+        condition: service_healthy
+      twenty-redis:
+        condition: service_healthy
+    environment:
+      NODE_PORT: "3000"
+      SERVER_URL: ${TWENTY_SERVER_URL:-http://twenty-server:3000}
+      PG_DATABASE_URL: postgres://${TWENTY_PG_USER:-twenty}:${TWENTY_PG_PASSWORD}@twenty-db:5432/${TWENTY_PG_DATABASE:-twenty}
+      REDIS_URL: redis://twenty-redis:6379
+      APP_SECRET: ${TWENTY_APP_SECRET:?set TWENTY_APP_SECRET in .env for twenty profile}
+      STORAGE_TYPE: ${TWENTY_STORAGE_TYPE:-local}
+    volumes:
+      - twenty_server_data:/app/packages/twenty-server/.local-storage
+    # Runtime reaches CRM on aion_internal. Do not publish 3000 on the host by default.
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:3000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    networks:
+      - internal
+      # Optional public UI — only when TWENTY_DOMAIN is set and Traefik labels desired.
+      - traefik
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - traefik.enable=${TWENTY_TRAEFIK_ENABLE:-false}
+      - traefik.docker.network=${AION_TRAEFIK_NETWORK:-aion_edge}
+      - traefik.http.routers.aion-twenty.rule=Host(`${TWENTY_DOMAIN:-twenty.localhost}`)
+      - traefik.http.routers.aion-twenty.entrypoints=${AION_TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.aion-twenty.tls=true
+      - traefik.http.routers.aion-twenty.tls.certresolver=${AION_TRAEFIK_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.services.aion-twenty.loadbalancer.server.port=3000
+      - traefik.http.routers.aion-twenty.service=aion-twenty
+
+  twenty-worker:
+    profiles: ["twenty"]
+    image: twentycrm/twenty:${TWENTY_TAG:-v0.40.0}
+    restart: unless-stopped
+    command: ["yarn", "worker:prod"]
+    depends_on:
+      twenty-db:
+        condition: service_healthy
+      twenty-server:
+        condition: service_healthy
+    environment:
+      SERVER_URL: ${TWENTY_SERVER_URL:-http://twenty-server:3000}
+      PG_DATABASE_URL: postgres://${TWENTY_PG_USER:-twenty}:${TWENTY_PG_PASSWORD}@twenty-db:5432/${TWENTY_PG_DATABASE:-twenty}
+      REDIS_URL: redis://twenty-redis:6379
+      APP_SECRET: ${TWENTY_APP_SECRET:?set TWENTY_APP_SECRET in .env for twenty profile}
+      DISABLE_DB_MIGRATIONS: "true"
+      DISABLE_CRON_JOBS_REGISTRATION: "true"
+      STORAGE_TYPE: ${TWENTY_STORAGE_TYPE:-local}
+    volumes:
+      - twenty_server_data:/app/packages/twenty-server/.local-storage
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  twenty_pgdata:
+  twenty_server_data:
