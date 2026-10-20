@@ -16,13 +16,30 @@ system-of-engagement** (ADR-019). Profile-gated — **off by default**.
    (`http://twenty-server:3000`).
 5. **Secrets** — `TWENTY_*` live in root-owned `0600` `/opt/aion/.env` only.
 
+## Staging host prerequisite (Gate A)
+
+Gate A must run on an **isolated non-production host**, not the production
+Docker daemon that already serves live Runtime / PostgreSQL / Traefik.
+
+1. Provision a separate staging VPS (or equivalent) with its own Docker daemon.
+2. Use a staging-only `/opt/aion/.env` (mode `0600`) — never copy production
+   secret values. Required Twenty names: `TWENTY_PG_PASSWORD`,
+   `TWENTY_APP_SECRET` (plus staging Runtime `TWENTY_API_*` /
+   `CRM_PROVIDER` / staging DB URL when you enable the adapter).
+3. Prefer GitHub Environment `staging` for CI-injected names once that
+   Environment has secrets; leave production Environment untouched.
+4. Confirm `twenty_pgdata` is not shared with production `aion_data`.
+
+Do **not** paste secret values into chat, tickets, or PRs. Do **not** set
+`CRM_PROVIDER=twenty` on production until Gate D.
+
 ## Enable (dev / staging)
 
-From `providers/vps/`:
+From `providers/vps/` **on the staging host**:
 
 ```bash
-# 1. Add TWENTY_* placeholders from ../.env.example into /opt/aion/.env
-# 2. Bring up Twenty without touching the default Runtime CRM path:
+# 1. Add TWENTY_* placeholders from ../.env.example into staging /opt/aion/.env
+# 2. Bring up Twenty without touching the production Runtime CRM path:
 docker compose \
   -f docker-compose.yml \
   -f twenty/docker-compose.twenty.yml \
