@@ -51,6 +51,9 @@ jobs:
         with:
           working_directory: providers
           soft_fail: true # advisory in Phase 3; documented in policies/README.md
+          # Pin + token: unauthenticated /releases/latest hits GitHub API 403 rate limits.
+          version: v1.28.14
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
   # The runtime host is built + tested in the aion-runtime repo's own CI
   # (ADR-002). aion-infra consumes its image, so there is no runtime build here.
