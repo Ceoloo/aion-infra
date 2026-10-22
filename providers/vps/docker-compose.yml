@@ -125,6 +125,9 @@ services:
       # Bearer must match a token in Runtime AION_GATEWAY_API_KEYS (service principal).
       AION_RUNTIME_API_KEY: ${AION_RUNTIME_API_KEY:-}
       AION_TENANT_ID: ${AION_TENANT_ID:-aion-systems}
+      # Inbound Copilot auth (AIO-39) — required off-local; sessions are owned by caller.
+      AION_COPILOT_AUTH_MODE: ${AION_COPILOT_AUTH_MODE:-required}
+      AION_COPILOT_API_KEY: ${AION_COPILOT_API_KEY:?set AION_COPILOT_API_KEY for revenue-copilot profile}
       # GHL_* reserved — read-only wiring later; writes blocked until gateway:
       # GHL_API_KEY: ${GHL_API_KEY}
       # GHL_LOCATION_ID: ${GHL_LOCATION_ID}
