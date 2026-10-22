@@ -202,11 +202,15 @@ jobs:
           echo "DEPLOY_GIT_SHA=${DEPLOY_GIT_SHA}"
 
       - name: deploy
-        uses: appleboy/ssh-action@v1
+        # Pin to the reviewed v1.2.5 commit (mutable @v1 tag is not deploy-safe).
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          # SHA256 host key fingerprint — set VPS_SSH_FINGERPRINT in repo secrets
+          # (ssh-keyscan -t ed25519,rsa <host> | ssh-keygen -lf -).
+          fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}
           envs: DEPLOY_IMAGE,DEPLOY_GIT_SHA,DEPLOY_RELEASE_TAG
           script: |
             set -euo pipefail
