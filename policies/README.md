@@ -40,8 +40,27 @@ accepted limitations, recorded rather than hidden.
 
 ## Supply chain (aion-infra §51)
 
+Maps to SIS **Software Supply-Chain Trust Gate** (`SIS-SC-01…06`) from the
+Oct 26, 2026 TechOps Monday Intelligence Brief (LiteLLM-class compromise).
+
+| Requirement | Current posture |
+|---|---|
+| Dependency inventory / SBOM | Partial — lockfiles present; formal SBOM export not yet gated |
+| Digest-pinned production images | Met on VPS deploy path (`@sha256:`; refuses `:latest`) |
+| Release / artifact verification | Partial — SHA identity; signature/provenance gate not yet blocking |
+| CI credentials least-privilege | Partial — Environment reviewers on production; standing-token inventory still ops work |
+| Secret scanning blocking | Met — `gitleaks` blocking in `validate.yml` |
+| Rollback to last-known-good digest | Met-path — deploy scripts support previous digest; formal drill evidence still required |
+
+Baseline hygiene already enforced:
+
 - Dependencies are locked (`package-lock.json`, committed Terraform provider
   lock files) and builds use them.
-- GitHub Actions are pinned to trusted major versions.
+- GitHub Actions are pinned to trusted major versions (prefer full commit SHA
+  pins as a hardening follow-on).
 - No `curl | sh` in any pipeline step.
 - The deployed git SHA is always identifiable.
+
+Follow-on (do not pretend complete): Artifact Registry / GHCR vulnerability
+scanning as a **blocking** gate on critical CVEs; SBOM attached to each
+release; Action pins migrated from `@vN` tags to full SHAs where practical.
