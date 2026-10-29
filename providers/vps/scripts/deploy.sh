@@ -68,7 +68,8 @@ env_scalar() {
 }
 for _k in MIGRATION_DATABASE_URL AION_DOMAIN AION_IMAGE AION_EDGE AION_TRAEFIK_NETWORK \
           AION_TRAEFIK_NETWORK_EXTERNAL AION_LOCAL_DB AION_ENVIRONMENT DATABASE_SSL \
-          AION_SKIP_PUBLIC_PROBE; do
+          AION_SKIP_PUBLIC_PROBE AION_ROLLBACK_COMPATIBLE_IMAGE \
+          AION_ROLLBACK_COMPATIBLE_GIT_SHA; do
   env_scalar "${_k}"
 done
 : "${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}"
@@ -167,8 +168,12 @@ wait_healthy() {
 }
 
 rollback() {
-  echo "[deploy] ROLLBACK — restoring ${PREV_IMAGE:-<none>}" >&2
-  if [ -n "${PREV_IMAGE}" ] && [ "${PREV_IMAGE}" != "${AION_IMAGE}" ]; then
+  if [ -n "${PREV_IMAGE}" ] && [ "${PREV_IMAGE}" != "${AION_IMAGE}" ] \
+     && [[ "${PREV_IMAGE}" =~ ^ghcr\.io/ceoloo/aion-runtime@sha256:[a-f0-9]{64}$ ]] \
+     && [ "${PREV_IMAGE}" = "${AION_ROLLBACK_COMPATIBLE_IMAGE:-}" ] \
+     && [ -n "${PREV_GIT_SHA}" ] \
+     && [ "${PREV_GIT_SHA}" = "${AION_ROLLBACK_COMPATIBLE_GIT_SHA:-}" ]; then
+    echo "[deploy] ROLLBACK — restoring explicitly qualified compatible image ${PREV_IMAGE} (${PREV_GIT_SHA})" >&2
     # Put .env back so a later manual `docker compose up` does not re-deploy the
     # bad revision (the caller/workflow set these to the new image).
     sed -i "s#^AION_IMAGE=.*#AION_IMAGE=${PREV_IMAGE}#" .env
@@ -185,7 +190,8 @@ rollback() {
       echo "[deploy] rollback did NOT reach healthy — MANUAL INTERVENTION REQUIRED" >&2
     fi
   else
-    echo "[deploy] no distinct previous image to roll back to — leaving current state" >&2
+    echo "[deploy] automatic rollback blocked: previous image/SHA is not explicitly qualified for the migrated schema" >&2
+    echo "[deploy] candidate state left in place; MANUAL INTERVENTION REQUIRED (migrations are forward-only)" >&2
   fi
   exit 1
 }
