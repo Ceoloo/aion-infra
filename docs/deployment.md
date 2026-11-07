@@ -3,6 +3,31 @@
 The release pipeline and its human gates (aion-infra §24–26). Infrastructure is
 declarative; releases are controlled; production is deliberate.
 
+## Identity trust-boundary staging authorization (AIO-121)
+
+For the Sentinel → Runtime → Data / Forge Identity rollout, **a successful PR
+test must not cause a staging deployment**. Before merging this proposed
+control-plane release gate, the operator must confirm whether existing
+automation depends on staging auto-deploy and obtain maintainer review.
+This changes the staging workflow from automatically deploying on main to
+**explicit workflow_dispatch from main**, with:
+
+- `target=staging`, `change_ticket=AIO-121`, and an exact reviewed
+  `runtime_image=ghcr.io/ceoloo/aion-runtime:<40-hex-commit-sha>` input.
+- Configured GitHub **staging Environment** with required reviewers. This is
+  **an external administrative policy**; YAML alone does not activate human
+  review. An AIO ticket string is provenance, not permission.
+- Distinct staging GCP project/service account/Secret Manager secrets and
+  migrations administered by the authorized maintainer.
+- Previously observed serving SHA / rollback image, approved window, and
+  independent reviewer/operator signatures recorded in AIO-121.
+
+Do not dispatch on behalf of the operator without their explicit approval of
+the exact project, change, image and rollback plan. Do not set protection
+variables/credentials from an agent. This PR is **not** itself approval to
+change staging, and it does not touch production workflows or current
+runtime deployment state.
+
 ## Pipelines
 
 The runtime **image** is built and published by the
@@ -12,7 +37,7 @@ aion-infra **consumes** it and builds nothing.
 | Workflow | Trigger | Does |
 |---|---|---|
 | `validate.yml` | every PR + push to `main` | fmt, validate, tfsec (advisory), infra portability + verify, gitleaks, staging plan (if cloud auth configured) — **always runs, provider-independent** |
-| `deploy-gcp.yml` (staging) | push to `main` **and GCP configured** | resolve immutable image → apply infra → migrate job → roll service → smoke |
+| `deploy-gcp.yml` (staging) | **manual dispatch on `main`** with reviewed immutable runtime image and AIO change ticket; GCP configured + staging Environment reviewers | approved request → migrate job → roll service → smoke |
 | `deploy-gcp.yml` (production) | manual dispatch, `main` only **and GCP configured** | **required-reviewer approval** → same steps with prod identity |
 | `deploy-vps.yml` | manual dispatch | resolve immutable image → SSH → pull → migrate → roll → readiness → smoke |
 
@@ -25,8 +50,9 @@ The GCP deploy jobs carry an `if` guard requiring
 `vars.GCP_WORKLOAD_IDENTITY_PROVIDER` **and** the per-environment CI
 service-account var to be set. Until GCP is configured the jobs are **skipped**
 (not failed), so an unprovisioned provider produces no noisy red runs and a
-genuine failure is unambiguous. Setting the vars reactivates GCP with no code
-change. `validate.yml` is **never** gated — credential-free checks run regardless.
+genuine failure is unambiguous. Setting the vars makes the GCP jobs eligible. Staging additionally
+requires an explicit main-branch workflow dispatch with a pinned image and
+ticket, plus a separately configured required-reviewer policy. `validate.yml` is **never** gated — credential-free checks run regardless.
 
 ### Immutable release (no bare `:latest`)
 
