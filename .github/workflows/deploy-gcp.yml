@@ -1,7 +1,10 @@
 name: deploy
 
-# Controlled deployment (aion-infra §24–26). Staging deploys automatically after
-# a merge to main; PRODUCTION requires a deliberate human approval via the
+# Controlled deployment (aion-infra §24–26). Staging requires explicit
+# manual dispatch on main with a reviewed image pin and change ticket.
+# A GitHub Environment required-reviewer policy must also be configured
+# independently; a ticket string alone does NOT authorize a deployment.
+# PRODUCTION requires a deliberate human approval via the
 # GitHub Environment protection rule (the human gate — §25, §64) and only ever
 # runs from main. No AI worker can independently release to production.
 #
@@ -24,8 +27,12 @@ on:
         options: [staging, production]
         default: staging
       runtime_image:
-        description: Pin a specific aion-runtime image (blank = resolve latest main SHA)
+        description: Immutable aion-runtime SHA image; mandatory for staging
         default: ''
+      change_ticket:
+        description: Staging change ticket (e.g. AIO-121); this is not approval
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -62,18 +69,40 @@ jobs:
             echo "image=ghcr.io/ceoloo/aion-runtime:${SHA}" >> "$GITHUB_OUTPUT"
           fi
 
-  # ── Staging: automatic after merge to main — ONLY when GCP is configured ──
+  # ── Staging: EXPLICIT dispatch from main + change ticket + immutable pin ────
+  # A GitHub staging Environment with independent required reviewers must
+  # exist. This workflow cannot itself certify that GitHub protection is set.
   staging:
-    name: deploy staging
+    name: deploy staging (human-review required)
     needs: resolve
-    if: >
-      (github.event_name == 'push' || github.event.inputs.target == 'staging') &&
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.event.inputs.target == 'staging' &&
+      github.event.inputs.runtime_image != '' &&
       vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
       vars.GCP_CI_SERVICE_ACCOUNT_STAGING != ''
     runs-on: ubuntu-latest
     environment: staging
     steps:
       - uses: actions/checkout@v4
+      - name: Refuse unpinned or untracked staging releases
+        env:
+          PINNED: ${{ github.event.inputs.runtime_image }}
+          CHANGE: ${{ github.event.inputs.change_ticket }}
+        run: |
+          set -euo pipefail
+          # Only a known AION Runtime repository and immutable 40-char SHA tag.
+          [[ "$PINNED" =~ ^ghcr\.io/ceoloo/aion-runtime:[0-9a-f]{40}$ ]] || {
+            echo "staging requires ghcr.io/ceoloo/aion-runtime:<40-char-reviewed-sha>" >&2
+            exit 1
+          }
+          [[ "$CHANGE" =~ ^AIO-[0-9]+$ ]] || {
+            echo "staging requires a tracked AION change ticket" >&2
+            exit 1
+          }
+          echo "staging change=$CHANGE image pinned; NOT a human approval"
+
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}

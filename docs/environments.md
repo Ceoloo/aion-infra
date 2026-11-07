@@ -21,8 +21,9 @@ placeholders. Nothing here touches a managed service.
 ### staging
 A complete, separately-credentialed cloud stack — useful, not ceremonial. It
 runs real migrations, a real image deploy, health + smoke tests, and DB
-connectivity against a **smaller, zonal** Cloud SQL instance. Deploys
-automatically after a merge to `main`.
+connectivity against a **smaller, zonal** Cloud SQL instance. A proposed identity-security release hardening requires manual,
+reviewer-gated staging dispatch with an immutable image SHA; do not promote a
+CI pass to deployment authorization.
 
 ### production
 The same architecture as staging, differing only where safety requires it:
